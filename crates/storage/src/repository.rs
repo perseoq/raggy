@@ -5,7 +5,7 @@ use rusqlite::{params, OptionalExtension, Row};
 use raggy_rag::Chunk;
 
 use crate::error::Result;
-use crate::models::{Document, Folder, FolderStatus};
+use crate::models::{Document, Folder, FolderStatus, Message, Session};
 use crate::Storage;
 
 impl Storage {
@@ -291,6 +291,123 @@ impl Storage {
     }
 }
 
+impl Storage {
+    // ---------------------------------------------------------------- sesiones
+
+    /// Inserta o actualiza una sesión.
+    pub fn upsert_session(&self, session: &Session) -> Result<()> {
+        self.connection().execute(
+            "INSERT INTO sessions (id, folder_id, title, provider, model, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(id) DO UPDATE SET
+                 title = excluded.title,
+                 provider = excluded.provider,
+                 model = excluded.model,
+                 updated_at = excluded.updated_at",
+            params![
+                session.id,
+                session.folder_id,
+                session.title,
+                session.provider,
+                session.model,
+                session.created_at,
+                session.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Lista las sesiones de una carpeta, las más recientes primero.
+    pub fn list_sessions(&self, folder_id: &str) -> Result<Vec<Session>> {
+        let mut stmt = self.connection().prepare(
+            "SELECT id, folder_id, title, provider, model, created_at, updated_at
+             FROM sessions WHERE folder_id = ?1 ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map([folder_id], row_to_session)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Recupera una sesión por identificador.
+    pub fn get_session(&self, id: &str) -> Result<Option<Session>> {
+        let session = self
+            .connection()
+            .query_row(
+                "SELECT id, folder_id, title, provider, model, created_at, updated_at
+                 FROM sessions WHERE id = ?1",
+                [id],
+                row_to_session,
+            )
+            .optional()?;
+        Ok(session)
+    }
+
+    /// Renombra una sesión.
+    pub fn rename_session(&self, id: &str, title: &str) -> Result<()> {
+        self.connection().execute(
+            "UPDATE sessions SET title = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, title, now_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    /// Actualiza el proveedor y el modelo de una sesión (HU-15).
+    pub fn update_session_model(&self, id: &str, provider: &str, model: &str) -> Result<()> {
+        self.connection().execute(
+            "UPDATE sessions SET provider = ?2, model = ?3, updated_at = ?4 WHERE id = ?1",
+            params![id, provider, model, now_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    /// Marca la sesión como actualizada.
+    pub fn touch_session(&self, id: &str) -> Result<()> {
+        self.connection().execute(
+            "UPDATE sessions SET updated_at = ?2 WHERE id = ?1",
+            params![id, now_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    /// Elimina una sesión y, en cascada, sus mensajes.
+    pub fn delete_session(&self, id: &str) -> Result<()> {
+        self.connection()
+            .execute("DELETE FROM sessions WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------- mensajes
+
+    /// Añade un mensaje a una sesión.
+    pub fn add_message(&self, message: &Message) -> Result<()> {
+        let citations =
+            serde_json::to_string(&message.citations).unwrap_or_else(|_| "[]".to_string());
+        self.connection().execute(
+            "INSERT INTO messages (id, session_id, role, content, anchored, citations, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                message.id,
+                message.session_id,
+                message.role,
+                message.content,
+                message.anchored as i64,
+                citations,
+                message.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Lista los mensajes de una sesión en orden cronológico.
+    pub fn list_messages(&self, session_id: &str) -> Result<Vec<Message>> {
+        let mut stmt = self.connection().prepare(
+            "SELECT id, session_id, role, content, anchored, created_at, citations
+             FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
+        )?;
+        let rows = stmt.query_map([session_id], row_to_message)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+}
+
 fn row_to_folder(row: &Row<'_>) -> rusqlite::Result<Folder> {
     let status: String = row.get(3)?;
     Ok(Folder {
@@ -301,6 +418,35 @@ fn row_to_folder(row: &Row<'_>) -> rusqlite::Result<Folder> {
         file_count: row.get(4)?,
         created_at: row.get(5)?,
         updated_at: row.get(6)?,
+    })
+}
+
+fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
+    Ok(Session {
+        id: row.get(0)?,
+        folder_id: row.get(1)?,
+        title: row.get(2)?,
+        provider: row.get(3)?,
+        model: row.get(4)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+    })
+}
+
+fn row_to_message(row: &Row<'_>) -> rusqlite::Result<Message> {
+    let citations: Option<String> = row.get(6)?;
+    let citations = citations
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default();
+
+    Ok(Message {
+        id: row.get(0)?,
+        session_id: row.get(1)?,
+        role: row.get(2)?,
+        content: row.get(3)?,
+        anchored: row.get::<_, i64>(4)? != 0,
+        citations,
+        created_at: row.get(5)?,
     })
 }
 

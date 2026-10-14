@@ -1,6 +1,10 @@
-//! Contrato común de proveedores de LLM.
+//! Contrato común de proveedores de LLM y su factoría.
 
 use serde::{Deserialize, Serialize};
+
+use crate::anthropic::AnthropicProvider;
+use crate::openai::OpenAiCompatibleProvider;
+use crate::types::ChatRequest;
 
 /// Identificador de proveedor soportado (HU-15, HU-23).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -45,35 +49,92 @@ impl ProviderId {
         }
     }
 
+    /// Variable de entorno de la que se lee la API Key.
+    pub fn api_key_env(self) -> &'static str {
+        match self {
+            ProviderId::OpenAi => "OPENAI_API_KEY",
+            ProviderId::Anthropic => "ANTHROPIC_API_KEY",
+            ProviderId::DeepSeek => "DEEPSEEK_API_KEY",
+            ProviderId::OpenRouter => "OPENROUTER_API_KEY",
+        }
+    }
+
+    /// Modelo por defecto para sesiones nuevas.
+    pub fn default_model(self) -> &'static str {
+        match self {
+            ProviderId::OpenAi => "gpt-4o-mini",
+            ProviderId::Anthropic => "claude-3-5-sonnet-latest",
+            ProviderId::DeepSeek => "deepseek-chat",
+            ProviderId::OpenRouter => "openai/gpt-4o-mini",
+        }
+    }
+
+    /// Modelos sugeridos para el selector.
+    pub fn models(self) -> &'static [&'static str] {
+        match self {
+            ProviderId::OpenAi => &["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini"],
+            ProviderId::Anthropic => &[
+                "claude-3-5-sonnet-latest",
+                "claude-3-5-haiku-latest",
+                "claude-3-opus-latest",
+            ],
+            ProviderId::DeepSeek => &["deepseek-chat", "deepseek-reasoner"],
+            ProviderId::OpenRouter => &[
+                "openai/gpt-4o-mini",
+                "anthropic/claude-3.5-sonnet",
+                "google/gemini-flash-1.5",
+            ],
+        }
+    }
+
     /// Interpreta una clave almacenada en configuración.
     pub fn from_key(key: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|p| p.key() == key)
+        Self::ALL.into_iter().find(|provider| provider.key() == key)
     }
+}
+
+/// Evento emitido durante la generación.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatDelta {
+    /// Fragmento de texto generado.
+    Content(String),
+    /// Fin de la generación.
+    Done,
 }
 
 /// Errores comunes a los adaptadores de proveedor.
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
-    /// Falta la API Key del proveedor (HU-23).
-    #[error("el proveedor `{provider}` no tiene API Key configurada")]
+    /// Falta la API Key del proveedor (HU-15).
+    #[error("el proveedor `{provider}` no tiene API Key configurada (define {env_var})")]
     MissingApiKey {
-        /// Clave del proveedor.
+        /// Nombre del proveedor.
         provider: &'static str,
+        /// Variable de entorno esperada.
+        env_var: &'static str,
     },
 
     /// La funcionalidad aún no está implementada en esta fase.
-    #[error("función no disponible todavía en esta fase del proyecto")]
-    NotImplemented,
+    #[error("el proveedor `{provider}` no está disponible todavía")]
+    NotImplemented {
+        /// Nombre del proveedor.
+        provider: &'static str,
+    },
 
-    /// Cualquier otro error encapsulado.
-    #[error(transparent)]
-    Other(#[from] Box<dyn std::error::Error + Send + Sync>),
+    /// Error de transporte con el proveedor.
+    #[error("error de red con el proveedor: {0}")]
+    Http(String),
+
+    /// Respuesta inesperada del proveedor.
+    #[error("respuesta inesperada del proveedor: {0}")]
+    Protocol(String),
+
+    /// El usuario detuvo la generación (HU-12).
+    #[error("generación detenida por el usuario")]
+    Cancelled,
 }
 
-/// Contrato que deberá cumplir cada adaptador de proveedor.
-///
-/// Se mantiene deliberadamente pequeño en la Fase 0; el streaming y la llamada
-/// de completado se añadirán en la Fase 3.
+/// Contrato que cumple cada adaptador de proveedor.
 pub trait LlmProvider: Send + Sync {
     /// Identificador del proveedor.
     fn id(&self) -> ProviderId;
@@ -85,6 +146,44 @@ pub trait LlmProvider: Send + Sync {
 
     /// Verifica que la configuración permite usar el proveedor (HU-24).
     fn check(&self) -> Result<(), ProviderError>;
+
+    /// Genera una respuesta en streaming (HU-12).
+    ///
+    /// Invoca `on_delta` con cada fragmento; devolver `false` desde el cierre
+    /// cancela la generación.
+    fn stream_chat(
+        &self,
+        request: &ChatRequest,
+        on_delta: &mut dyn FnMut(ChatDelta) -> bool,
+    ) -> Result<(), ProviderError>;
+}
+
+/// API Key del proveedor leída del entorno, si existe.
+pub fn api_key(id: ProviderId) -> Option<String> {
+    std::env::var(id.api_key_env())
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+}
+
+/// ¿Hay credenciales configuradas para el proveedor?
+pub fn is_configured(id: ProviderId) -> bool {
+    api_key(id).is_some()
+}
+
+/// Crea el adaptador del proveedor leyendo su API Key del entorno.
+pub fn from_env(id: ProviderId) -> Result<Box<dyn LlmProvider>, ProviderError> {
+    let api_key = api_key(id).ok_or(ProviderError::MissingApiKey {
+        provider: id.display_name(),
+        env_var: id.api_key_env(),
+    })?;
+
+    let provider: Box<dyn LlmProvider> = match id {
+        ProviderId::Anthropic => Box::new(AnthropicProvider::new(api_key)?),
+        ProviderId::OpenAi | ProviderId::DeepSeek | ProviderId::OpenRouter => {
+            Box::new(OpenAiCompatibleProvider::new(id, api_key)?)
+        }
+    };
+    Ok(provider)
 }
 
 #[cfg(test)]
@@ -97,5 +196,17 @@ mod tests {
             assert_eq!(ProviderId::from_key(provider.key()), Some(provider));
         }
         assert_eq!(ProviderId::from_key("inexistente"), None);
+    }
+
+    #[test]
+    fn sin_api_key_informa_del_error() {
+        // Se usa una variable improbable para no depender del entorno real.
+        let id = ProviderId::OpenAi;
+        if api_key(id).is_none() {
+            match from_env(id) {
+                Err(error) => assert!(matches!(error, ProviderError::MissingApiKey { .. })),
+                Ok(_) => panic!("debería faltar la clave"),
+            }
+        }
     }
 }

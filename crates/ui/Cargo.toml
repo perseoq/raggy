@@ -1,6 +1,6 @@
 [package]
 name = "raggy-ui"
-description = "Interfaz gráfica de escritorio de Raggy Desktop (egui/eframe)."
+description = "Interfaz gráfica de escritorio de Raggy (egui/eframe)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,6 +11,7 @@ homepage.workspace = true
 
 [dependencies]
 raggy-core.workspace = true
+raggy-llm.workspace = true
 raggy-rag.workspace = true
 raggy-storage.workspace = true
 

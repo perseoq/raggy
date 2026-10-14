@@ -22,5 +22,5 @@ pub use embedding::{
     cosine_similarity, Embedding, EmbeddingBackend, EmbeddingProvider, HashingEmbedding,
 };
 pub use markdown::MarkdownChunker;
-pub use retriever::{HybridRetriever, RetrievedChunk, Retriever, RetrieverOptions};
+pub use retriever::{Citation, HybridRetriever, RetrievedChunk, Retriever, RetrieverOptions};
 pub use vector::VectorIndex;

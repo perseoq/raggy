@@ -14,6 +14,27 @@ pub enum Role {
     Assistant,
 }
 
+impl Role {
+    /// Clave estable usada en persistencia.
+    pub fn key(self) -> &'static str {
+        match self {
+            Role::System => "system",
+            Role::User => "user",
+            Role::Assistant => "assistant",
+        }
+    }
+
+    /// Interpreta la clave almacenada.
+    pub fn from_key(key: &str) -> Option<Self> {
+        match key {
+            "system" => Some(Role::System),
+            "user" => Some(Role::User),
+            "assistant" => Some(Role::Assistant),
+            _ => None,
+        }
+    }
+}
+
 /// Mensaje de una conversación.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -71,5 +92,13 @@ mod tests {
         assert_eq!(ChatMessage::system("x").role, Role::System);
         assert_eq!(ChatMessage::user("x").role, Role::User);
         assert_eq!(ChatMessage::assistant("x").role, Role::Assistant);
+    }
+
+    #[test]
+    fn el_rol_es_biyectivo_con_su_clave() {
+        for role in [Role::System, Role::User, Role::Assistant] {
+            assert_eq!(Role::from_key(role.key()), Some(role));
+        }
+        assert_eq!(Role::from_key("otro"), None);
     }
 }

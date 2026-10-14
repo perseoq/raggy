@@ -2,10 +2,48 @@
 
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
+
 use crate::bm25::Bm25Index;
 use crate::chunk::Chunk;
 use crate::embedding::EmbeddingProvider;
 use crate::vector::VectorIndex;
+
+/// Cita verificable de un fragmento (HU-11).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Citation {
+    /// Nombre del archivo de origen.
+    pub source_file: String,
+    /// Ruta relativa a la carpeta indexada.
+    pub source_path: String,
+    /// Encabezado padre, si lo hay.
+    pub heading: Option<String>,
+    /// Primera línea citada (1-based).
+    pub start_line: usize,
+    /// Última línea citada (1-based).
+    pub end_line: usize,
+    /// Puntuación de recuperación.
+    pub score: f32,
+}
+
+impl Citation {
+    /// Construye la cita de un fragmento.
+    pub fn from_chunk(chunk: &Chunk, score: f32) -> Self {
+        Self {
+            source_file: chunk.metadata.source_file.clone(),
+            source_path: chunk.metadata.source_path.clone(),
+            heading: chunk.metadata.heading.clone(),
+            start_line: chunk.metadata.start_line,
+            end_line: chunk.metadata.end_line,
+            score,
+        }
+    }
+
+    /// Etiqueta legible, p. ej. `docs/guia.md:10-24`.
+    pub fn label(&self) -> String {
+        format!("{}:{}-{}", self.source_path, self.start_line, self.end_line)
+    }
+}
 
 /// Fragmento recuperado junto con sus puntuaciones.
 #[derive(Debug, Clone, PartialEq)]
@@ -18,6 +56,13 @@ pub struct RetrievedChunk {
     pub vector_score: f32,
     /// Puntuación léxica (BM25) normalizada a `0.0..=1.0`.
     pub lexical_score: f32,
+}
+
+impl RetrievedChunk {
+    /// Cita verificable del fragmento (HU-11).
+    pub fn citation(&self) -> Citation {
+        Citation::from_chunk(&self.chunk, self.score)
+    }
 }
 
 /// Parámetros de recuperación.

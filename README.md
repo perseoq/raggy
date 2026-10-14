@@ -5,10 +5,10 @@ a documentación Markdown local**. Indexas una carpeta, creas sesiones aisladas
 por carpeta y chateas con distintos proveedores de LLM (OpenAI, Anthropic,
 DeepSeek, OpenRouter), generando y descargando código trazable.
 
-> Estado: **Fase 2 completada** — se pueden indexar carpetas de Markdown y
-> buscar por contenido con recuperación híbrida local (embeddings + BM25),
-> viendo los fragmentos relevantes con su cita. El chat y las sesiones llegan
-> en la siguiente fase.
+> Estado: **Fase 3 completada** — además de indexar y buscar, ya se puede
+> chatear con el modelo en streaming sobre una sesión aislada por carpeta, con
+> respuestas ancladas al contexto recuperado y citas verificables. La gestión
+> de claves y el multi-proveedor completo llegan en la siguiente fase.
 
 ## Documentación
 
@@ -25,7 +25,7 @@ DeepSeek, OpenRouter), generando y descargando código trazable.
 | 0 | Cimientos: workspace, configuración, SQLite, esqueleto de UI y CI | ✅ |
 | 1 | Carpetas e indexación: añadir, escanear, chunking, incremental, eliminar | ✅ |
 | 2 | Motor RAG: embeddings, índice vectorial y recuperación | ✅ |
-| 3 | Chat y sesiones por carpeta | pendiente |
+| 3 | Chat y sesiones por carpeta | ✅ |
 | 4 | Multi-proveedor y claves | pendiente |
 | 5 | Generación y descarga de código, memoria de proyecto | pendiente |
 | 6 | Configuración avanzada, seguridad, exportación y pulido | pendiente |
@@ -76,6 +76,31 @@ DeepSeek, OpenRouter), generando y descargando código trazable.
 - **Panel de configuración** del RAG (HU-27): tamaño de fragmento, solapamiento,
   top-k, umbral de similitud y dimensionalidad del embedding, con validación y
   persistencia.
+
+### Fase 3 — chat y sesiones (HU-05 a HU-08, HU-12 a HU-15)
+
+- **Sesiones por carpeta** (HU-05): crear, renombrar y eliminar, con historial
+  persistente y reanudable (HU-07, HU-08); al eliminar una carpeta o sesión, sus
+  mensajes se borran en cascada.
+- **Aislamiento de contexto** (HU-06): cada sesión recupera únicamente de su
+  carpeta; el prompt nunca mezcla documentación de otras carpetas.
+- **Chat con streaming** (HU-12) en un hilo dedicado: la respuesta aparece token
+  a token, con botón **Detener** y mensajes de error claros que permiten
+  reintentar.
+- **Prompt de sistema estricto** (HU-14): el modelo solo responde con el contexto
+  recuperado, debe citar `[archivo:línea-línea]` y, si no lo encuentra, responder
+  «No encuentro esa información en los archivos indexados».
+- **Temperatura 0.1** por defecto y visible (HU-13).
+- **Selección de proveedor y modelo por sesión** (HU-15): OpenAI, Anthropic,
+  DeepSeek y OpenRouter; cada sesión recuerda su elección. Si falta la API Key se
+  indica cuál definir.
+- **Citas verificables** (HU-11): cada respuesta guarda y muestra sus fuentes;
+  las citas son enlaces que abren el archivo y su fragmento.
+
+> Las API Keys se leen **por ahora** de las variables de entorno
+> `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY` y
+> `OPENROUTER_API_KEY`. Su almacenamiento cifrado en el llavero del sistema
+> (HU-23) es el objetivo de la Fase 4.
 
 ## Estructura del proyecto
 

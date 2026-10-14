@@ -114,7 +114,7 @@ impl Session {
 }
 
 /// Mensaje dentro de una sesión (HU-07, HU-12).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Message {
     /// Identificador único.
     pub id: String,
@@ -126,8 +126,31 @@ pub struct Message {
     pub content: String,
     /// Si la respuesta está anclada a fuentes del RAG (HU-11).
     pub anchored: bool,
+    /// Fuentes citadas en la generación (HU-11).
+    pub citations: Vec<raggy_rag::Citation>,
     /// Fecha de creación en RFC 3339.
     pub created_at: String,
+}
+
+impl Message {
+    /// Crea un mensaje nuevo.
+    pub fn new(
+        session_id: impl Into<String>,
+        role: impl Into<String>,
+        content: impl Into<String>,
+        anchored: bool,
+        citations: Vec<raggy_rag::Citation>,
+    ) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            session_id: session_id.into(),
+            role: role.into(),
+            content: content.into(),
+            anchored,
+            citations,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        }
+    }
 }
 
 /// Archivo Markdown rastreado dentro de una carpeta (HU-02, HU-03).

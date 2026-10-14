@@ -4,6 +4,7 @@
 //! aplicación, localización de directorios de datos y el modelo de errores.
 //! No depende de la interfaz gráfica ni de ningún proveedor de LLM.
 
+pub mod chat;
 pub mod config;
 pub mod error;
 pub mod index;
@@ -11,6 +12,9 @@ pub mod paths;
 pub mod search;
 pub mod watch;
 
+pub use chat::{
+    compose_request, context_from_retrieved, ChatCommand, ChatEvent, ChatWorker, ProviderFactory,
+};
 pub use config::{AppConfig, ModelConfig, RagConfig, Theme, DEFAULT_TEMPERATURE};
 pub use error::{CoreError, Result};
 pub use index::{

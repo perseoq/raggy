@@ -1,12 +1,23 @@
 //! `raggy-llm` — capa de abstracción multi-proveedor.
 //!
-//! En la Fase 0 este crate define únicamente el contrato común ([`LlmProvider`])
-//! y los tipos normalizados de mensajes. Los adaptadores concretos (OpenAI,
-//! Anthropic, DeepSeek, OpenRouter) se implementarán en la Fase 3-4 (HU-15,
-//! HU-23, HU-24, HU-25).
+//! Normaliza los mensajes, el streaming y los errores de OpenAI, Anthropic,
+//! DeepSeek y OpenRouter tras un contrato común ([`LlmProvider`]). Incluye la
+//! construcción del prompt de sistema estricto (HU-14) y un proveedor simulado
+//! sin red para pruebas y demostración.
 
+pub mod anthropic;
+pub mod mock;
+pub mod openai;
+pub mod prompt;
 pub mod provider;
+pub mod sse;
 pub mod types;
 
-pub use provider::{LlmProvider, ProviderError, ProviderId};
+pub use anthropic::AnthropicProvider;
+pub use mock::MockProvider;
+pub use openai::OpenAiCompatibleProvider;
+pub use prompt::{build_system_prompt, ContextBlock, STRICT_SYSTEM_PROMPT};
+pub use provider::{
+    api_key, from_env, is_configured, ChatDelta, LlmProvider, ProviderError, ProviderId,
+};
 pub use types::{ChatMessage, ChatRequest, Role};
