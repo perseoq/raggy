@@ -1,12 +1,12 @@
 //! `raggy-rag` — motor de recuperación aumentada.
 //!
-//! La Fase 1 implementa el chunking semántico de Markdown (HU-09). La Fase 2
-//! añade el motor de recuperación (HU-10): embeddings locales deterministas,
-//! un índice vectorial por similitud coseno, un índice léxico BM25 y un
-//! recuperador híbrido que fusiona ambos y aplica el umbral de similitud.
+//! Incluye el chunking semántico de Markdown (encabezados, listas y bloques de
+//! código) y el motor de recuperación: embeddings locales deterministas, un
+//! índice vectorial por similitud coseno, un índice léxico BM25 y un recuperador
+//! híbrido que fusiona ambos y aplica el umbral de similitud.
 //!
-//! Todo el cómputo ocurre en local y sin descargar modelos, en línea con la
-//! promesa de privacidad de HU-30.
+//! Todo el cómputo ocurre en local y sin descargar modelos, para no enviar el
+//! corpus a terceros.
 
 pub mod bm25;
 pub mod chunk;

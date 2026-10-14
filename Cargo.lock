@@ -2504,7 +2504,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "raggy-app"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "raggy-core",
@@ -2520,7 +2520,7 @@ dependencies = [
 
 [[package]]
 name = "raggy-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "blake3",
  "chrono",
@@ -2541,7 +2541,7 @@ dependencies = [
 
 [[package]]
 name = "raggy-llm"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "reqwest",
  "serde",
@@ -2551,7 +2551,7 @@ dependencies = [
 
 [[package]]
 name = "raggy-rag"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "blake3",
  "pulldown-cmark",
@@ -2560,7 +2560,7 @@ dependencies = [
 
 [[package]]
 name = "raggy-storage"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "raggy-rag",
@@ -2574,7 +2574,7 @@ dependencies = [
 
 [[package]]
 name = "raggy-ui"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "eframe",
  "egui",

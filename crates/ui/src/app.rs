@@ -189,6 +189,7 @@ pub struct RaggyApp {
     settings_draft: RagConfig,
     secrets: Arc<dyn SecretStore>,
     keys_open: bool,
+    key_tab: ProviderId,
     key_inputs: HashMap<ProviderId, String>,
     key_status: HashMap<ProviderId, KeyStatus>,
     test_tx: Sender<(ProviderId, Result<Vec<String>, String>)>,
@@ -214,6 +215,8 @@ impl RaggyApp {
         crate::theme::apply(ctx, config.theme);
         let settings_draft = config.rag.clone();
         let secrets: Arc<dyn SecretStore> = Arc::new(SettingsStore::new(paths.settings_path()));
+        let key_tab =
+            ProviderId::from_key(&config.model.default_provider).unwrap_or(ProviderId::DeepSeek);
         let (test_tx, test_rx) = mpsc::channel();
 
         let mut app = Self {
@@ -244,6 +247,7 @@ impl RaggyApp {
             settings_draft,
             secrets,
             keys_open: false,
+            key_tab,
             key_inputs: HashMap::new(),
             key_status: HashMap::new(),
             test_tx,
@@ -1318,7 +1322,7 @@ impl RaggyApp {
             ui.horizontal(|ui| {
                 ui.heading(APP_NAME);
                 ui.separator();
-                ui.label(format!("v{APP_VERSION} · Fase 6"));
+                ui.label(format!("v{APP_VERSION}"));
                 ui.separator();
                 if ui.button("Añadir carpeta").clicked() {
                     actions.add = true;
@@ -1477,7 +1481,7 @@ impl RaggyApp {
         actions
     }
 
-    /// Vista de exploración: búsqueda y archivos de la carpeta (Fase 1 y 2).
+    /// Vista de exploración: búsqueda y archivos de la carpeta.
     fn explore_view(&mut self, ui: &mut egui::Ui) -> Vec<CentralAction> {
         let mut actions = Vec::new();
 
@@ -1588,7 +1592,7 @@ impl RaggyApp {
         actions
     }
 
-    /// Vista de chat de la sesión activa (Fase 3).
+    /// Vista de chat de la sesión activa.
     fn chat_view(&mut self, ui: &mut egui::Ui) -> Vec<CentralAction> {
         let mut actions = Vec::new();
         let Some(session) = self.active_session.clone() else {
@@ -2205,64 +2209,79 @@ impl RaggyApp {
         let mut actions: Vec<KeyAction> = Vec::new();
         let statuses = self.key_status.clone();
         let settings_path = self.paths.settings_path();
+        let mut tab = self.key_tab;
 
         egui::Window::new("Claves de API")
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
-            .default_width(660.0)
+            .default_width(520.0)
+            .min_width(460.0)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
                 ui.small(format!(
-                    "Las claves se guardan en {} (con permisos restringidos) y también se pueden \
-                     definir por variables de entorno. Nunca se muestran completas.",
+                    "Se guardan en {} (permisos restringidos) y nunca se muestran completas.",
                     settings_path.display()
                 ));
                 ui.add_space(8.0);
 
-                egui::Grid::new("keys_grid")
-                    .num_columns(3)
-                    .spacing([10.0, 10.0])
-                    .show(ui, |ui| {
-                        for provider in ProviderId::ALL {
-                            ui.vertical(|ui| {
-                                ui.strong(provider.display_name());
-                                ui.small(key_status_text(statuses.get(&provider)));
-                            });
+                // Una pestaña por proveedor; el punto marca los ya configurados.
+                ui.horizontal_wrapped(|ui| {
+                    for provider in ProviderId::ALL {
+                        let configured = matches!(
+                            statuses.get(&provider),
+                            Some(KeyStatus::Stored { .. })
+                                | Some(KeyStatus::Environment { .. })
+                                | Some(KeyStatus::Ok { .. })
+                        );
+                        let label = if configured {
+                            format!("{} ·", provider.display_name())
+                        } else {
+                            provider.display_name().to_string()
+                        };
+                        ui.selectable_value(&mut tab, provider, label);
+                    }
+                });
+                ui.separator();
+                ui.add_space(6.0);
 
-                            let input = self.key_inputs.entry(provider).or_default();
-                            ui.add(
-                                egui::TextEdit::singleline(input)
-                                    .password(true)
-                                    .desired_width(220.0)
-                                    .hint_text("pega la clave"),
-                            );
+                ui.heading(tab.display_name());
+                ui.label(key_status_text(statuses.get(&tab)));
+                ui.add_space(10.0);
 
-                            ui.horizontal(|ui| {
-                                if ui.button("Guardar").clicked() {
-                                    actions.push(KeyAction::Save(provider));
-                                }
-                                if ui.button("Probar").clicked() {
-                                    actions.push(KeyAction::Test(provider));
-                                }
-                                if ui.button("Eliminar").clicked() {
-                                    actions.push(KeyAction::Delete(provider));
-                                }
-                            });
-                            ui.end_row();
-                        }
-                    });
+                ui.label("Clave de API");
+                let input = self.key_inputs.entry(tab).or_default();
+                ui.add(
+                    egui::TextEdit::singleline(input)
+                        .password(true)
+                        .desired_width(360.0)
+                        .hint_text("pega la clave del proveedor"),
+                );
+                ui.add_space(10.0);
 
-                ui.add_space(8.0);
-                let env_vars: Vec<&str> = ProviderId::ALL
-                    .iter()
-                    .map(|provider| provider.api_key_env())
-                    .collect();
+                ui.horizontal(|ui| {
+                    if ui.button("Guardar").clicked() {
+                        actions.push(KeyAction::Save(tab));
+                    }
+                    if ui.button("Probar conexión").clicked() {
+                        actions.push(KeyAction::Test(tab));
+                    }
+                    if ui.button("Eliminar").clicked() {
+                        actions.push(KeyAction::Delete(tab));
+                    }
+                });
+
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(4.0);
                 ui.small(format!(
-                    "Alternativa sin llavero: define {} antes de abrir la aplicación.",
-                    env_vars.join(", ")
+                    "Alternativa: defínela en la variable de entorno {}.",
+                    tab.api_key_env()
                 ));
+                ui.small(format!("Modelos sugeridos: {}", tab.models().join(", ")));
             });
+
+        self.key_tab = tab;
 
         for action in actions {
             match action {
