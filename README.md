@@ -59,8 +59,8 @@ Windows.
 - **Multi-proveedor por sesión**: OpenAI, Anthropic, DeepSeek y OpenRouter.
 - **Prueba de conexión** por proveedor y **proveedor de respaldo** si el activo
   falla (nunca se cambia sin tu consentimiento).
-- **Tema** claro, oscuro o el del sistema; **parámetros del RAG** configurables
-  con avisos para valores extremos.
+- **Tema** claro (**Novel**), oscuro (**Tokyo Night**) o el del sistema;
+  **parámetros del RAG** configurables con avisos para valores extremos.
 - **Directorio de datos** configurable con migración de los datos existentes.
 - **Exportar una sesión** a Markdown (con historial, citas y artefactos).
 - **Respaldo e importación** en un `.zip` con verificación de integridad.

@@ -187,6 +187,7 @@ pub struct RaggyApp {
     session_dialog: Option<SessionDialog>,
     settings_open: bool,
     settings_draft: RagConfig,
+    visuals_applied: Option<(Theme, bool)>,
     secrets: Arc<dyn SecretStore>,
     keys_open: bool,
     key_tab: ProviderId,
@@ -245,6 +246,7 @@ impl RaggyApp {
             session_dialog: None,
             settings_open: false,
             settings_draft,
+            visuals_applied: None,
             secrets,
             keys_open: false,
             key_tab,
@@ -1455,7 +1457,7 @@ impl RaggyApp {
         let mut actions = Vec::new();
         egui::CentralPanel::default().show(ui, |ui| {
             if let Some(fatal) = &self.fatal {
-                ui.colored_label(egui::Color32::RED, fatal);
+                ui.colored_label(crate::theme::error_color(ui.visuals().dark_mode), fatal);
                 return;
             }
 
@@ -1679,7 +1681,7 @@ impl RaggyApp {
 
             if !self.provider_ready(provider) {
                 ui.colored_label(
-                    egui::Color32::from_rgb(200, 140, 0),
+                    crate::theme::warning_color(ui.visuals().dark_mode),
                     format!("Sin API Key ({})", provider.api_key_env()),
                 );
                 if ui.small_button("Configurar").clicked() {
@@ -1787,7 +1789,7 @@ impl RaggyApp {
         self.chat_input = input;
 
         if let Some(error) = &self.chat_error {
-            ui.colored_label(egui::Color32::RED, error);
+            ui.colored_label(crate::theme::error_color(ui.visuals().dark_mode), error);
 
             let fallback = session
                 .fallback_provider
@@ -2381,7 +2383,7 @@ impl RaggyApp {
                 ui.small("Cambiar el tamaño de fragmento o la dimensionalidad requiere reindexar.");
                 for warning in &warnings {
                     ui.colored_label(
-                        egui::Color32::from_rgb(200, 140, 0),
+                        crate::theme::warning_color(ui.visuals().dark_mode),
                         format!("Aviso: {warning}"),
                     );
                 }
@@ -2873,6 +2875,14 @@ impl eframe::App for RaggyApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 
+        // Aplica la paleta cuando cambia el tema elegido o el del sistema.
+        let resolved = ctx.theme();
+        let key = (self.config.theme, resolved == egui::Theme::Dark);
+        if self.visuals_applied != Some(key) {
+            ctx.set_visuals(crate::theme::visuals(self.config.theme, resolved));
+            self.visuals_applied = Some(key);
+        }
+
         // Recuerda el tamaño de la ventana para restaurarlo en el próximo arranque.
         let size = ui.max_rect().size();
         if size.x > 1.0 && size.y > 1.0 {
@@ -2934,11 +2944,11 @@ fn snippet(content: &str) -> String {
     snippet
 }
 
-/// Etiqueta legible de un tema (HU-26).
+/// Etiqueta legible de un tema.
 fn theme_label(theme: Theme) -> &'static str {
     match theme {
-        Theme::Light => "Claro",
-        Theme::Dark => "Oscuro",
+        Theme::Light => "Claro · Novel",
+        Theme::Dark => "Oscuro · Tokyo Night",
         Theme::System => "Sistema",
     }
 }
@@ -3075,13 +3085,15 @@ fn highlight_job(ui: &egui::Ui, language: Option<&str>, code: &str) -> egui::tex
         900.0
     };
 
+    let palette = crate::theme::syntax_colors(ui.visuals().dark_mode);
+
     for token in tokenize_code(language, code) {
         let color = match token.kind {
             TokenKind::Plain => base,
-            TokenKind::Keyword => egui::Color32::from_rgb(86, 156, 214),
-            TokenKind::Str => egui::Color32::from_rgb(206, 145, 120),
-            TokenKind::Comment => egui::Color32::from_rgb(120, 150, 110),
-            TokenKind::Number => egui::Color32::from_rgb(181, 206, 168),
+            TokenKind::Keyword => palette.keyword,
+            TokenKind::Str => palette.string,
+            TokenKind::Comment => palette.comment,
+            TokenKind::Number => palette.number,
         };
         job.append(
             &token.text,

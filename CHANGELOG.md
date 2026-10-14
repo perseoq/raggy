@@ -4,10 +4,19 @@ Todos los cambios relevantes de este proyecto se documentan aquí.
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/)
 y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
-> **Convención del proyecto:** la versión menor se incrementa en cada cambio
-> (1.0 → 1.1 → 1.2 …) y la mayor queda reservada para cambios incompatibles.
+> **Convención del proyecto:** la versión y la etiqueta siguen el folio del
+> commit, `1.0.<n>` y `v1.0.<n>`, donde `n` es el número del commit en `main`.
 
 ## [No publicado]
+
+## [1.0.18] - 2026-10-14
+
+### Cambiado
+
+- **Temas visuales**: el modo claro usa la paleta **Novel** (la misma que incluye
+  el terminal *ptyxis*) y el oscuro **Tokyo Night**; el modo «sistema» alterna
+  entre ambas. El resaltado de sintaxis, los avisos y los errores siguen la paleta
+  activa.
 
 ## [1.0.0] - 2026-10-14
 
@@ -60,5 +69,6 @@ Primera versión estable: cubre las 32 historias de usuario de `hu.md`.
   (arm64) y Windows, se empaquetan con sus checksums SHA-256 y se publican en
   GitHub Releases.
 
-[No publicado]: https://github.com/perseoq/raggy/compare/v1.0.0...HEAD
+[No publicado]: https://github.com/perseoq/raggy/compare/v1.0.18...HEAD
+[1.0.18]: https://github.com/perseoq/raggy/releases/tag/v1.0.18
 [1.0.0]: https://github.com/perseoq/raggy/releases/tag/v1.0.0
