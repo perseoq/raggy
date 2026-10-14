@@ -9,6 +9,16 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [1.0.26] - 2026-10-14
+
+### Añadido
+
+- **`AGENTS.md`**: instrucciones persistentes del proyecto. Fijan el flujo de
+  publicación de cada cambio: registrar la lista de cambios en el `CHANGELOG`,
+  subir la versión `1.0.<n>` (donde `<n>` es el número del commit), ejecutar
+  formato/Clippy/pruebas/`build --release`, commit y `push`, y crear el tag
+  `v1.0.<n>` que dispara la Release con los binarios por plataforma.
+
 ## [1.0.25] - 2026-10-14
 
 ### Cambiado
