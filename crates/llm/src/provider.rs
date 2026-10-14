@@ -78,7 +78,7 @@ impl ProviderId {
                 "claude-3-5-haiku-latest",
                 "claude-3-opus-latest",
             ],
-            ProviderId::DeepSeek => &["deepseek-chat", "deepseek-reasoner"],
+            ProviderId::DeepSeek => &["deepseek-chat", "deepseek-flash", "deepseek-v4-pro"],
             ProviderId::OpenRouter => &[
                 "openai/gpt-4o-mini",
                 "anthropic/claude-3.5-sonnet",

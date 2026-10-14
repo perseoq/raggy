@@ -275,16 +275,22 @@ fn split_lines(
 
             if scan < end && !in_code[scan] {
                 if is_blank[scan - 1] {
-                    if preferred.is_none() {
-                        preferred = Some(scan);
-                    }
-                } else if fallback.is_none() {
+                    // Se prefiere el ÚLTIMO corte en línea en blanco que quepa,
+                    // para aprovechar el límite en lugar de partir cada párrafo.
+                    preferred = Some(scan);
+                } else {
                     fallback = Some(scan);
                 }
             }
         }
 
-        let mut chunk_end = preferred.or(fallback).unwrap_or(scan);
+        // Si todo el rango cabe en el límite, se toma entero; si se cortó por
+        // tamaño, se usa el último corte válido que quepa.
+        let mut chunk_end = if scan >= end {
+            end
+        } else {
+            preferred.or(fallback).unwrap_or(scan)
+        };
         // Nunca cortar dentro de un bloque de código.
         while chunk_end < end && in_code[chunk_end] {
             chunk_end += 1;
@@ -433,7 +439,32 @@ mod tests {
     }
 
     #[test]
-    fn es_determinista_y_no_genera_vacios() {
+    fn agrupa_parrafos_hasta_el_limite() {
+        let content = "# Doc\n\n\
+            Párrafo uno con bastante texto para ocupar espacio y no ser trivial.\n\n\
+            Párrafo dos con bastante texto para ocupar espacio y no ser trivial.\n\n\
+            Párrafo tres con bastante texto para ocupar espacio y no ser trivial.\n";
+        let options = ChunkingOptions {
+            max_chars: 400,
+            overlap_chars: 0,
+        };
+        let chunks = chunk_markdown(&source(content), &options);
+        assert_eq!(
+            chunks.len(),
+            1,
+            "los párrafos deben agruparse en un solo fragmento, no uno por párrafo"
+        );
+    }
+
+    #[test]
+    fn no_genera_chunks_vacios() {
+        let content = "\n\n# A\n\n\n\ntexto\n\n\n# B\n\nmás texto\n\n\n";
+        let chunks = chunk_markdown(&source(content), &ChunkingOptions::default());
+        assert!(chunks.iter().all(|chunk| !chunk.content.trim().is_empty()));
+    }
+
+    #[test]
+    fn es_determinista() {
         let content = "\n\n# A\n\n\n\ntexto\n\n\n# B\n\nmás texto\n\n\n";
         let options = ChunkingOptions::default();
         let first = chunk_markdown(&source(content), &options);
@@ -443,7 +474,6 @@ mod tests {
             first.iter().map(|c| &c.id).collect::<Vec<_>>(),
             second.iter().map(|c| &c.id).collect::<Vec<_>>()
         );
-        assert!(first.iter().all(|c| !c.content.trim().is_empty()));
     }
 
     #[test]
