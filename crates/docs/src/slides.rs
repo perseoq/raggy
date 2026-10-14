@@ -44,10 +44,7 @@ pub fn extract(bytes: &[u8]) -> Result<ExtractedDocument> {
         });
     }
 
-    Ok(ExtractedDocument {
-        kind: DocKind::PowerPoint,
-        sections,
-    })
+    Ok(ExtractedDocument::new(DocKind::PowerPoint, sections))
 }
 
 /// Devuelve los nombres de las entradas de diapositivas del ZIP.

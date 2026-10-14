@@ -82,6 +82,8 @@ pub struct IndexSummary {
     pub files_failed: usize,
     /// Fragmentos escritos en el índice.
     pub chunks_written: usize,
+    /// Avisos no fatales de la indexación (p. ej. OCR no disponible).
+    pub warnings: Vec<String>,
 }
 
 /// ¿La ruta es un archivo que se puede indexar? (Markdown o código)
@@ -212,8 +214,8 @@ pub fn index_folder(
             continue;
         }
 
-        let chunks = match extract_chunks(path, &relative, &bytes, &chunker, options) {
-            Ok(chunks) => chunks,
+        let (chunks, warnings) = match extract_chunks(path, &relative, &bytes, &chunker, options) {
+            Ok(result) => result,
             Err(error) => {
                 tracing::warn!(
                     path = %path.display(),
@@ -223,6 +225,10 @@ pub fn index_folder(
                 continue;
             }
         };
+        for warning in &warnings {
+            tracing::warn!(path = %path.display(), "{warning}");
+        }
+        summary.warnings.extend(warnings);
 
         let embeddings: Vec<Vec<f32>> = chunks
             .iter()
@@ -279,20 +285,21 @@ fn uses_markdown_chunker(path: &Path) -> bool {
 
 /// Obtiene los fragmentos de un archivo: Markdown y código pasan por el chunker
 /// semántico; el resto se extrae con `raggy-docs` y se trocea por secciones.
+/// Devuelve además los avisos no fatales de la extracción (p. ej. OCR).
 fn extract_chunks(
     path: &Path,
     relative: &str,
     bytes: &[u8],
     chunker: &MarkdownChunker,
     options: &IndexOptions,
-) -> Result<Vec<Chunk>> {
+) -> Result<(Vec<Chunk>, Vec<String>)> {
     if uses_markdown_chunker(path) {
         let content = String::from_utf8_lossy(bytes);
         let source = ChunkSource {
             relative_path: relative,
             content: &content,
         };
-        return Ok(chunker.chunk(&source, &options.chunking));
+        return Ok((chunker.chunk(&source, &options.chunking), Vec::new()));
     }
 
     let document = raggy_docs::extract(path, &ExtractOptions::default()).map_err(|error| {
@@ -301,6 +308,7 @@ fn extract_chunks(
             message: error.to_string(),
         }
     })?;
+    let warnings = document.warnings;
 
     let sections: Vec<DocumentSection> = document
         .sections
@@ -314,7 +322,10 @@ fn extract_chunks(
         })
         .collect();
 
-    Ok(chunk_sections(relative, &sections, &options.chunking))
+    Ok((
+        chunk_sections(relative, &sections, &options.chunking),
+        warnings,
+    ))
 }
 
 fn relative_path(root: &Path, path: &Path) -> String {

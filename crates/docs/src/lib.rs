@@ -3,17 +3,20 @@
 //! Convierte documentos distintos de Markdown en una lista de secciones con su
 //! ubicación, lista para el chunking y las citas. Cubre texto plano, CSV, Excel
 //! (`.xlsx`, `.xls`, `.xlsm`), Word (`.docx`), PowerPoint (`.pptx`) y PDF con
-//! capa de texto; las fases siguientes añaden OCR de PDF escaneados y los
-//! formatos legacy `.doc`/`.ppt` (vía LibreOffice).
+//! capa de texto; los PDF escaneados se pueden reconocer por OCR con Tesseract
+//! (rasterizando con Poppler), y los formatos legacy `.doc`/`.ppt` se abordan en
+//! una fase posterior vía LibreOffice.
 //!
 //! El crate no depende del motor RAG ni de la interfaz: solo lee el archivo y
 //! devuelve secciones.
 
 pub mod csv;
 pub mod excel;
+pub mod ocr;
 pub mod pdf;
 pub mod slides;
 pub mod text;
+pub mod tools;
 pub mod word;
 
 use std::path::Path;
@@ -56,7 +59,7 @@ pub enum DocKind {
     Word,
     /// Presentación de PowerPoint.
     PowerPoint,
-    /// Documento PDF con capa de texto.
+    /// Documento PDF.
     Pdf,
 }
 
@@ -133,16 +136,27 @@ pub struct Section {
     pub text: String,
 }
 
-/// Documento extraído: su tipo y sus secciones.
+/// Documento extraído: su tipo, sus secciones y los avisos de la extracción.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtractedDocument {
     /// Tipo de documento.
     pub kind: DocKind,
     /// Secciones en orden de aparición.
     pub sections: Vec<Section>,
+    /// Avisos no fatales (p. ej. OCR no disponible).
+    pub warnings: Vec<String>,
 }
 
 impl ExtractedDocument {
+    /// Crea un documento sin avisos.
+    pub fn new(kind: DocKind, sections: Vec<Section>) -> Self {
+        Self {
+            kind,
+            sections,
+            warnings: Vec::new(),
+        }
+    }
+
     /// ¿El documento no produjo ningún texto?
     pub fn is_empty(&self) -> bool {
         self.sections
@@ -151,12 +165,26 @@ impl ExtractedDocument {
     }
 }
 
-/// Opciones de extracción.
-///
-/// En esta fase no hay ninguna; las fases de PDF y OCR añadirán aquí el idioma
-/// de OCR, el número máximo de páginas y si el OCR está activo.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ExtractOptions {}
+/// Opciones de extracción, incluidas las del OCR.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtractOptions {
+    /// ¿Se intenta OCR cuando el documento no tiene texto?
+    pub ocr_enabled: bool,
+    /// Idiomas de OCR, en orden de preferencia (p. ej. `["spa"]`).
+    pub ocr_languages: Vec<String>,
+    /// Texto mínimo de una página para considerar que tiene capa de texto.
+    pub min_text_chars: usize,
+}
+
+impl Default for ExtractOptions {
+    fn default() -> Self {
+        Self {
+            ocr_enabled: true,
+            ocr_languages: vec!["spa".to_string()],
+            min_text_chars: 24,
+        }
+    }
+}
 
 /// Extrae el texto de `path` según su extensión.
 pub fn extract(path: &Path, options: &ExtractOptions) -> Result<ExtractedDocument> {
@@ -169,19 +197,18 @@ pub fn extract(path: &Path, options: &ExtractOptions) -> Result<ExtractedDocumen
     let kind = DocKind::from_extension(&extension)
         .ok_or_else(|| ExtractError::Unsupported(extension.clone()))?;
 
-    let _ = options;
     Ok(match kind {
         DocKind::Text => text::extract(&read_bytes(path)?),
         DocKind::Csv => csv::extract(&read_bytes(path)?)?,
         DocKind::Excel => excel::extract(path)?,
         DocKind::Word => word::extract(&read_bytes(path)?)?,
         DocKind::PowerPoint => slides::extract(&read_bytes(path)?)?,
-        DocKind::Pdf => pdf::extract(&read_bytes(path)?)?,
+        DocKind::Pdf => pdf::extract(path, options)?,
     })
 }
 
 /// Lee el archivo como bytes, con un error que incluye la ruta.
-fn read_bytes(path: &Path) -> Result<Vec<u8>> {
+pub(crate) fn read_bytes(path: &Path) -> Result<Vec<u8>> {
     std::fs::read(path).map_err(|source| ExtractError::Io {
         path: path.display().to_string(),
         source,
@@ -219,6 +246,13 @@ mod tests {
         );
         assert_eq!(Location::Slide(3).label(), "diapositiva 3");
         assert_eq!(Location::Page(7).label(), "página 7");
+    }
+
+    #[test]
+    fn opciones_por_defecto_activan_ocr_en_espanol() {
+        let options = ExtractOptions::default();
+        assert!(options.ocr_enabled);
+        assert_eq!(options.ocr_languages, vec!["spa".to_string()]);
     }
 
     #[test]

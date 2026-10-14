@@ -27,10 +27,7 @@ pub fn extract(bytes: &[u8]) -> ExtractedDocument {
         }]
     };
 
-    ExtractedDocument {
-        kind: DocKind::Text,
-        sections,
-    }
+    ExtractedDocument::new(DocKind::Text, sections)
 }
 
 /// Normaliza saltos de línea y elimina el BOM inicial.

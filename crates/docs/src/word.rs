@@ -170,10 +170,7 @@ fn build_document(paragraphs: Vec<Paragraph>) -> ExtractedDocument {
         ));
     }
 
-    ExtractedDocument {
-        kind: DocKind::Word,
-        sections,
-    }
+    ExtractedDocument::new(DocKind::Word, sections)
 }
 
 /// Construye una sección a partir de las líneas acumuladas.

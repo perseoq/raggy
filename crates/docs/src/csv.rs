@@ -46,10 +46,7 @@ pub fn extract(bytes: &[u8]) -> Result<ExtractedDocument> {
         sections.push(make_section(&headers, batch_start, row_number, &batch));
     }
 
-    Ok(ExtractedDocument {
-        kind: DocKind::Csv,
-        sections,
-    })
+    Ok(ExtractedDocument::new(DocKind::Csv, sections))
 }
 
 /// Convierte una fila en `columna: valor; …`.

@@ -49,10 +49,7 @@ pub fn extract(path: &Path) -> Result<ExtractedDocument> {
         }
     }
 
-    Ok(ExtractedDocument {
-        kind: DocKind::Excel,
-        sections,
-    })
+    Ok(ExtractedDocument::new(DocKind::Excel, sections))
 }
 
 /// Crea la sección de un lote de filas de una hoja.
