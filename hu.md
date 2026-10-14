@@ -436,8 +436,11 @@ documentos soportados,
 **para** no perder el trabajo si cambio de equipo.
 
 **Criterios de aceptación:**
-- Función "Exportar todo" que empaqueta índice, base de datos y artefactos.
-- Función "Importar" que restaura en otra instalación.
-- Se valida integridad del paquete antes de restaurar.
+- Función "Exportar todo" que empaqueta base de datos, configuración (sin claves),
+  archivos subidos y archivos físicos de artefactos registrados.
+- Función "Importar" que restaura en un directorio de datos nuevo y lo activa al
+  reiniciar, sin sobrescribir archivos de la instalación actualmente abierta.
+- Se validan integridad, rutas, número de entradas y tamaños del paquete antes
+  de activar la restauración.
 
  

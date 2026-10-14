@@ -88,7 +88,12 @@ Windows.
   **parámetros del RAG** configurables con avisos para valores extremos.
 - **Directorio de datos** configurable con migración de los datos existentes.
 - **Exportar una sesión** a Markdown (con historial, citas y artefactos).
-- **Respaldo e importación** en un `.zip` con verificación de integridad.
+- **Respaldo e importación** en un `.zip` con base de datos, configuración sin
+  claves, archivos subidos y artefactos físicos registrados; se verifica integridad y
+  límites antes de restaurar en un directorio de datos nuevo.
+  La restauración cambia `data_dir` y requiere reiniciar; las carpetas fuente
+  externas no se copian (sus chunks sí quedan en la base de datos), por lo que
+  se necesitan los originales para volver a indexarlas en otro equipo.
 
 ---
 

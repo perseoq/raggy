@@ -5,6 +5,7 @@
 //! proveedor/modelo por defecto (HU-15).
 
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -272,13 +273,12 @@ impl AppConfig {
         let mut serialized = serde_json::to_string_pretty(&document)?;
         zeroize_api_keys(&mut document);
         let write_result =
-            std::fs::write(path, serialized.as_bytes()).map_err(|source| CoreError::Io {
+            write_settings_atomic(path, serialized.as_bytes()).map_err(|source| CoreError::Io {
                 path: path.to_path_buf(),
                 source,
             });
         serialized.zeroize();
         write_result?;
-        restrict_permissions(path);
         Ok(())
     }
 
@@ -355,6 +355,22 @@ impl AppConfig {
         }
         Ok(())
     }
+}
+
+/// Escribe settings mediante un archivo temporal privado en el mismo directorio
+/// y lo sustituye atómicamente para no dejar JSON parcial ante un cierre abrupto.
+pub(crate) fn write_settings_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    temporary.write_all(bytes)?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(path).map_err(|error| error.error)?;
+    restrict_permissions(path);
+    Ok(())
 }
 
 /// Zeroiza los valores del campo `api_keys` de un documento JSON mutable.

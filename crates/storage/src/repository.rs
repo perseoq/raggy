@@ -73,6 +73,16 @@ impl Storage {
         Ok(folder)
     }
 
+    /// Actualiza la ruta de una carpeta gestionada al restaurar datos en otra
+    /// instalación.
+    pub fn update_folder_path(&self, id: &str, path: &str) -> Result<()> {
+        self.connection().execute(
+            "UPDATE folders SET path = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, path, now_rfc3339()],
+        )?;
+        Ok(())
+    }
+
     /// Actualiza el estado y el contador de archivos de una carpeta.
     pub fn set_folder_status(&self, id: &str, status: FolderStatus, file_count: i64) -> Result<()> {
         self.connection().execute(
@@ -488,6 +498,16 @@ impl Storage {
     pub fn delete_artifact(&self, id: &str) -> Result<()> {
         self.connection()
             .execute("DELETE FROM artifacts WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Actualiza la ubicación física de un artefacto restaurado desde un
+    /// respaldo.
+    pub fn update_artifact_path(&self, id: &str, path: &str) -> Result<()> {
+        self.connection().execute(
+            "UPDATE artifacts SET path = ?2 WHERE id = ?1",
+            params![id, path],
+        )?;
         Ok(())
     }
 }

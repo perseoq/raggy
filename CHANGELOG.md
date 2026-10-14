@@ -33,6 +33,11 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
   para tamaño máximo de archivo, expansión de paquetes Office, páginas PDF,
   tiempo máximo de Tesseract/Poppler/LibreOffice y píxeles OCR. La expansión ZIP
   se mide al descomprimir y el texto PDF tiene un tope por página y documento.
+- **Fase 5 de correcciones 2.2.0 — respaldos completos**: se incluyen archivos
+  subidos y los archivos físicos de artefactos registrados. La importación valida
+  nombres, integridad y límites de tamaño/entradas; extrae en un directorio
+  temporal privado con limpieza automática, reubica subidas/artefactos y apunta
+  settings.json al nuevo directorio sin pisar la base activa.
 - **Fase 4 de correcciones 2.2.0 — límites de recursos**: límites configurables
   para tamaño de entrada, expansión de paquetes Office, páginas PDF y píxeles
   OCR; timeout configurable de Tesseract/Poppler/LibreOffice. La extracción ZIP

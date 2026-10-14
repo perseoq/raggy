@@ -218,18 +218,13 @@ fn write_keys(path: &Path, keys: &HashMap<String, String>) -> Result<()> {
         map.insert("api_keys".to_string(), serde_json::Value::Object(object));
     }
 
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| SecretError::Store(error.to_string()))?;
-    }
-
     let mut serialized = serde_json::to_string_pretty(&document)
         .map_err(|error| SecretError::Store(error.to_string()))?;
-    let write_result = std::fs::write(path, serialized.as_bytes())
+    let write_result = crate::config::write_settings_atomic(path, serialized.as_bytes())
         .map_err(|error| SecretError::Store(error.to_string()));
     serialized.zeroize();
     zeroize_document_keys(&mut document);
     write_result?;
-    crate::config::restrict_permissions(path);
     Ok(())
 }
 

@@ -2873,8 +2873,9 @@ impl RaggyApp {
                     }
                 });
                 ui.small(
-                    "El paquete incluye la base de datos y la configuración, y se verifica su \
-                     integridad antes de restaurar.",
+                    "Incluye base de datos, configuración sin claves, archivos subidos y \
+                     artefactos físicos registrados. Se valida el ZIP antes de restaurar \
+                     en un directorio nuevo.",
                 );
 
                 ui.add_space(10.0);
@@ -3064,11 +3065,23 @@ impl RaggyApp {
         };
         match raggy_core::import_backup(&archive, &self.paths) {
             Ok(summary) => {
-                self.status = format!(
-                    "Respaldo restaurado ({} archivos). Reinicia la aplicación para recargar los datos.",
-                    summary.files
-                );
-                self.reload_folders();
+                if let Some(restored_dir) = summary.restored_data_dir {
+                    self.config = AppConfig::load_or_default(&self.paths.settings_path());
+                    self.settings_draft = self.config.rag.clone();
+                    self.settings_ingest = self.config.ingest.clone();
+                    self.settings_languages = self.config.ingest.ocr_languages.join(", ");
+                    self.refresh_keys();
+                    self.status = format!(
+                        "Respaldo restaurado ({} archivos) en {}. Reinicia la aplicación para usarlo.",
+                        summary.files,
+                        restored_dir.display()
+                    );
+                } else {
+                    self.status = format!(
+                        "Respaldo restaurado ({} archivos). Reinicia la aplicación para usar los datos.",
+                        summary.files
+                    );
+                }
             }
             Err(error) => self.status = format!("No se pudo importar el respaldo: {error}"),
         }
@@ -3089,7 +3102,8 @@ impl RaggyApp {
             .show(ctx, |ui| {
                 ui.label(format!("¿Restaurar «{}»?", archive.display()));
                 ui.small(
-                    "Se sobrescribirán la base de datos y la configuración actuales. \
+                    "Se preparará un directorio de datos nuevo y se cambiará la \
+                     configuración al restaurarlo. El directorio actual se conserva. \
                      Reinicia la aplicación después de restaurar.",
                 );
                 ui.add_space(8.0);
