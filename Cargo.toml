@@ -50,6 +50,8 @@ rusqlite = { version = "0.40", features = ["bundled", "backup"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.0", features = ["v4"] }
 zip = { version = "9", default-features = false, features = ["deflate"] }
+cap-std = "3.4.6"
+tempfile = "3.27.0"
 
 # --- rutas del sistema ---
 directories = "6.0"

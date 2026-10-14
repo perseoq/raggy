@@ -89,7 +89,7 @@ impl Ocr {
 
         let directory =
             crate::temp_directory("ocr").map_err(|error| ExtractError::Parse(error.to_string()))?;
-        let prefix = directory.join("page");
+        let prefix = directory.path().join("page");
         let page_number = page.to_string();
 
         let status = Command::new(pdftoppm)
@@ -107,7 +107,7 @@ impl Ocr {
             .status();
 
         let result = match status {
-            Ok(status) if status.success() => first_png(&directory)
+            Ok(status) if status.success() => first_png(directory.path())
                 .ok_or_else(|| ExtractError::Parse("pdftoppm no generó ninguna imagen".to_string()))
                 .and_then(|image| self.recognize_image(&image)),
             Ok(status) => Err(ExtractError::Parse(format!(
@@ -115,8 +115,6 @@ impl Ocr {
             ))),
             Err(error) => Err(ExtractError::Parse(error.to_string())),
         };
-
-        let _ = std::fs::remove_dir_all(&directory);
         result
     }
 

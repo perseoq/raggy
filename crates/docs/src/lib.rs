@@ -20,18 +20,56 @@ pub mod text;
 pub mod tools;
 pub mod word;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-/// Crea un directorio temporal único con el prefijo indicado.
-pub(crate) fn temp_directory(prefix: &str) -> std::io::Result<PathBuf> {
-    use std::sync::atomic::{AtomicU64, Ordering};
+/// Crea un directorio temporal privado y único; se elimina al salir de scope.
+pub(crate) fn temp_directory(prefix: &str) -> std::io::Result<tempfile::TempDir> {
+    let prefix = format!("raggy-{prefix}-");
+    let mut builder = tempfile::Builder::new();
+    builder.prefix(&prefix);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(std::fs::Permissions::from_mode(0o700));
+    }
+    builder.tempdir()
+}
 
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let directory =
-        std::env::temp_dir().join(format!("raggy-{prefix}-{}-{sequence}", std::process::id()));
-    std::fs::create_dir_all(&directory)?;
-    Ok(directory)
+#[cfg(test)]
+mod temporary_directory_tests {
+    use super::temp_directory;
+
+    #[test]
+    fn temporal_es_unico_y_se_limpia_automaticamente() {
+        let first_path = {
+            let first = temp_directory("test").expect("crea temporal");
+            let path = first.path().to_path_buf();
+            assert!(path.is_dir());
+
+            let second = temp_directory("test").expect("crea segundo temporal");
+            assert_ne!(path, second.path());
+            path
+        };
+
+        assert!(
+            !first_path.exists(),
+            "TempDir debe eliminarse al salir de scope"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn temporal_es_privado_en_unix() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = temp_directory("permisos").expect("crea temporal");
+        let mode = std::fs::metadata(directory.path())
+            .expect("lee permisos")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700);
+    }
 }
 
 /// Error de extracción de un documento.

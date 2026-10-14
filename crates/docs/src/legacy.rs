@@ -53,11 +53,8 @@ pub fn extract(path: &Path, target: LegacyTarget) -> Result<ExtractedDocument> {
 
     let directory =
         temp_directory("soffice").map_err(|error| ExtractError::Parse(error.to_string()))?;
-    let outcome = convert(&soffice, path, target, &directory)
-        .and_then(|converted| dispatch(target, &converted));
-    let _ = std::fs::remove_dir_all(&directory);
-
-    outcome
+    let converted = convert(&soffice, path, target, directory.path())?;
+    dispatch(target, &converted)
 }
 
 /// Convierte el archivo con LibreOffice y devuelve la ruta del resultado.
@@ -146,10 +143,9 @@ mod tests {
     #[test]
     fn encuentra_por_extension() {
         let directory = crate::temp_directory("legacy-test").expect("crea temporal");
-        std::fs::write(directory.join("resultado.docx"), b"x").expect("escribe");
-        assert!(find_with_extension(&directory, "docx").is_some());
-        assert!(find_with_extension(&directory, "pptx").is_none());
-        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::write(directory.path().join("resultado.docx"), b"x").expect("escribe");
+        assert!(find_with_extension(directory.path(), "docx").is_some());
+        assert!(find_with_extension(directory.path(), "pptx").is_none());
     }
 
     #[test]

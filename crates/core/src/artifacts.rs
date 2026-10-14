@@ -4,7 +4,11 @@
 //! descartan rutas absolutas, unidades y componentes `..` para que un artefacto
 //! nunca se guarde fuera de la carpeta elegida.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
+
+use cap_std::ambient_authority;
+use cap_std::fs::{Dir, OpenOptions};
 
 use raggy_llm::ArtifactContext;
 use raggy_storage::Artifact;
@@ -83,38 +87,127 @@ pub fn save_artifact(
 ) -> Result<SaveOutcome> {
     let relative = sanitize_relative(relative)
         .ok_or_else(|| CoreError::Artifact(format!("ruta no válida: {relative}")))?;
-    let target = root.join(Path::new(&relative));
+    let relative_path = PathBuf::from(&relative);
+    std::fs::create_dir_all(root).map_err(|source| CoreError::Io {
+        path: root.to_path_buf(),
+        source,
+    })?;
+    let root_dir =
+        Dir::open_ambient_dir(root, ambient_authority()).map_err(|source| CoreError::Io {
+            path: root.to_path_buf(),
+            source,
+        })?;
+    let target = root.join(&relative_path);
 
-    if target.exists() {
+    if root_dir
+        .try_exists(&relative_path)
+        .map_err(|source| CoreError::Io {
+            path: target.clone(),
+            source,
+        })?
+    {
         match policy {
             ConflictPolicy::Fail => return Ok(SaveOutcome::Exists(target)),
             ConflictPolicy::Overwrite => {
-                write_file(&target, content)?;
+                safe_write(&root_dir, &relative_path, content, true, &target)?;
                 return Ok(SaveOutcome::Written(target));
             }
             ConflictPolicy::Rename => {
-                let renamed = free_path(&target);
-                write_file(&renamed, content)?;
+                let renamed_relative = free_relative_path(&root_dir, &relative_path, &target)?;
+                let renamed = root.join(&renamed_relative);
+                safe_write(&root_dir, &renamed_relative, content, false, &renamed)?;
                 return Ok(SaveOutcome::Renamed(renamed));
             }
         }
     }
 
-    write_file(&target, content)?;
+    safe_write(&root_dir, &relative_path, content, false, &target)?;
     Ok(SaveOutcome::Written(target))
 }
 
-fn write_file(target: &Path, content: &str) -> Result<()> {
-    if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent).map_err(|source| CoreError::Io {
-            path: parent.to_path_buf(),
+/// Escribe mediante un descriptor de directorio limitado a la raíz elegida.
+/// `create_new` no sigue un enlace simbólico en el nombre final; para
+/// sobrescribir se elimina primero la entrada (no su destino) y se crea un
+/// archivo nuevo, evitando también modificar un posible hard link externo.
+fn safe_write(
+    root: &Dir,
+    relative: &Path,
+    content: &str,
+    overwrite: bool,
+    display_path: &Path,
+) -> Result<()> {
+    if let Some(parent) = relative
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        root.create_dir_all(parent)
+            .map_err(|source| CoreError::Io {
+                path: display_path.to_path_buf(),
+                source,
+            })?;
+    }
+
+    if overwrite
+        && root.try_exists(relative).map_err(|source| CoreError::Io {
+            path: display_path.to_path_buf(),
+            source,
+        })?
+    {
+        root.remove_file(relative).map_err(|source| CoreError::Io {
+            path: display_path.to_path_buf(),
             source,
         })?;
     }
-    std::fs::write(target, content).map_err(|source| CoreError::Io {
-        path: target.to_path_buf(),
-        source,
-    })
+
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    let mut file = root
+        .open_with(relative, &options)
+        .map_err(|source| CoreError::Io {
+            path: display_path.to_path_buf(),
+            source,
+        })?;
+    if let Err(source) = file.write_all(content.as_bytes()) {
+        drop(file);
+        let _ = root.remove_file(relative);
+        return Err(CoreError::Io {
+            path: display_path.to_path_buf(),
+            source,
+        });
+    }
+    Ok(())
+}
+
+/// Busca un nombre alternativo libre desde el descriptor de la raíz.
+fn free_relative_path(root: &Dir, target: &Path, display_path: &Path) -> Result<PathBuf> {
+    let parent = target.parent().unwrap_or_else(|| Path::new(""));
+    let stem = target
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("archivo");
+    let extension = target.extension().and_then(|extension| extension.to_str());
+
+    for index in 1..10_000 {
+        let name = match extension {
+            Some(extension) => format!("{stem}_{index}.{extension}"),
+            None => format!("{stem}_{index}"),
+        };
+        let candidate = parent.join(name);
+        let exists = root
+            .try_exists(&candidate)
+            .map_err(|source| CoreError::Io {
+                path: display_path.to_path_buf(),
+                source,
+            })?;
+        if !exists {
+            return Ok(candidate);
+        }
+    }
+
+    Err(CoreError::Artifact(format!(
+        "no se pudo encontrar un nombre libre para `{}`",
+        display_path.display()
+    )))
 }
 
 /// Devuelve un nombre de archivo libre añadiendo un sufijo numérico.
@@ -253,6 +346,34 @@ mod tests {
         let result = save_artifact(&dir, "../fuera.py", "x", ConflictPolicy::Fail);
         assert!(matches!(result, Err(CoreError::Artifact(_))));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn un_enlace_simbolico_no_permite_escribir_fuera_de_la_raiz() {
+        use std::os::unix::fs::symlink;
+
+        let root = temp_dir("symlink-root");
+        let outside = temp_dir("symlink-outside");
+        let original = outside.join("secreto.txt");
+        std::fs::write(&original, "original").expect("crea archivo externo");
+        symlink(&outside, root.join("escape")).expect("crea enlace simbólico");
+
+        let result = save_artifact(
+            &root,
+            "escape/resultado.py",
+            "contenido controlado por el modelo",
+            ConflictPolicy::Fail,
+        );
+
+        assert!(result.is_err(), "la escritura debe quedar confinada a root");
+        assert_eq!(
+            std::fs::read_to_string(original).expect("lee archivo externo"),
+            "original"
+        );
+        assert!(!outside.join("resultado.py").exists());
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside);
     }
 
     #[test]

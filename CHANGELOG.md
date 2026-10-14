@@ -25,6 +25,10 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
   reindexación aunque los bytes del archivo no cambien. Si el recorrido del
   sistema de archivos es incompleto, no se borran del índice rutas no vistas.
   SQLite espera hasta 5 segundos ante escrituras concurrentes.
+- **Fase 3 de correcciones 2.2.0 — archivos seguros**: el guardado de artefactos
+  usa un descriptor de directorio confinado a la carpeta elegida y no sigue
+  enlaces simbólicos que escapen de ella. Los temporales de OCR y conversión
+  ahora son privados, impredecibles y se limpian automáticamente.
 
 ## [2.1.0] - 2026-10-14
 
