@@ -1,6 +1,6 @@
 [package]
 name = "localmind-core"
-description = "Tipos de dominio, configuración y rutas de datos de LocalMind."
+description = "Tipos de dominio, configuración, rutas de datos e indexación de LocalMind."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,8 +10,14 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
+localmind-rag.workspace = true
+localmind-storage.workspace = true
+
 serde.workspace = true
 toml.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 directories.workspace = true
+walkdir.workspace = true
+notify.workspace = true
+blake3.workspace = true

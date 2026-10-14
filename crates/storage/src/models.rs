@@ -130,6 +130,50 @@ pub struct Message {
     pub created_at: String,
 }
 
+/// Archivo Markdown rastreado dentro de una carpeta (HU-02, HU-03).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Document {
+    /// Identificador único.
+    pub id: String,
+    /// Carpeta a la que pertenece.
+    pub folder_id: String,
+    /// Ruta relativa a la raíz de la carpeta.
+    pub relative_path: String,
+    /// Hash del contenido completo del archivo.
+    pub content_hash: String,
+    /// Tamaño en bytes.
+    pub size_bytes: i64,
+    /// Fecha de modificación en milisegundos desde la época UNIX.
+    pub modified_at: i64,
+    /// Fecha de indexación en RFC 3339.
+    pub indexed_at: String,
+    /// Número de fragmentos generados.
+    pub chunk_count: i64,
+}
+
+impl Document {
+    /// Crea el registro de un documento recién indexado.
+    pub fn new(
+        folder_id: impl Into<String>,
+        relative_path: impl Into<String>,
+        content_hash: impl Into<String>,
+        size_bytes: i64,
+        modified_at: i64,
+        chunk_count: i64,
+    ) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            folder_id: folder_id.into(),
+            relative_path: relative_path.into(),
+            content_hash: content_hash.into(),
+            size_bytes,
+            modified_at,
+            indexed_at: chrono::Utc::now().to_rfc3339(),
+            chunk_count,
+        }
+    }
+}
+
 /// Artefacto de código generado y descargado (HU-20).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Artifact {

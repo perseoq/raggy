@@ -11,6 +11,10 @@ homepage.workspace = true
 
 [dependencies]
 localmind-core.workspace = true
+localmind-rag.workspace = true
+localmind-storage.workspace = true
+
 eframe.workspace = true
 egui.workspace = true
+rfd.workspace = true
 tracing.workspace = true

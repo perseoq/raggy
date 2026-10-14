@@ -6,11 +6,18 @@
 
 pub mod config;
 pub mod error;
+pub mod index;
 pub mod paths;
+pub mod watch;
 
 pub use config::{AppConfig, ModelConfig, RagConfig, Theme, DEFAULT_TEMPERATURE};
 pub use error::{CoreError, Result};
+pub use index::{
+    index_folder, scan_markdown_files, IndexCommand, IndexEvent, IndexPhase, IndexProgress,
+    IndexSummary, IndexWorker,
+};
 pub use paths::AppPaths;
+pub use watch::FolderWatcher;
 
 /// Nombre comercial del producto.
 pub const APP_NAME: &str = "LocalMind";

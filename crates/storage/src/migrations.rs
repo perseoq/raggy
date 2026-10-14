@@ -20,14 +20,21 @@ pub struct Migration {
 }
 
 /// Migraciones conocidas, en orden creciente de versión.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    description: "esquema inicial: carpetas, chunks, sesiones, mensajes y artefactos",
-    sql: include_str!("../migrations/0001_initial.sql"),
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        description: "esquema inicial: carpetas, chunks, sesiones, mensajes y artefactos",
+        sql: include_str!("../migrations/0001_initial.sql"),
+    },
+    Migration {
+        version: 2,
+        description: "seguimiento por archivo para re-indexación incremental",
+        sql: include_str!("../migrations/0002_documents.sql"),
+    },
+];
 
 /// Versión de esquema que espera este binario.
-pub const LATEST_SCHEMA_VERSION: i64 = 1;
+pub const LATEST_SCHEMA_VERSION: i64 = 2;
 
 /// Aplica todas las migraciones pendientes dentro de una transacción.
 pub fn apply(conn: &mut Connection) -> Result<i64> {

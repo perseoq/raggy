@@ -23,6 +23,27 @@ pub enum CoreError {
     #[error("configuración inválida: {0}")]
     InvalidConfig(String),
 
+    /// Error de indexación con contexto de la ruta afectada.
+    #[error("error al indexar `{path}`: {message}")]
+    Index {
+        /// Ruta de la carpeta o archivo.
+        path: PathBuf,
+        /// Detalle del problema.
+        message: String,
+    },
+
+    /// Error procedente de la capa de persistencia.
+    #[error(transparent)]
+    Storage(#[from] localmind_storage::StorageError),
+
+    /// Error al recorrer el sistema de archivos.
+    #[error("error al recorrer archivos: {0}")]
+    Walk(#[from] walkdir::Error),
+
+    /// Error al vigilar cambios en el sistema de archivos.
+    #[error("error al vigilar la carpeta: {0}")]
+    Notify(#[from] notify::Error),
+
     /// Fallo al serializar la configuración a TOML.
     #[error("no se pudo serializar la configuración: {0}")]
     Serialize(#[from] toml::ser::Error),

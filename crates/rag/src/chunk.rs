@@ -22,6 +22,8 @@ pub struct ChunkMetadata {
 pub struct Chunk {
     /// Identificador estable derivado del contenido y la ubicación.
     pub id: String,
+    /// Hash del contenido del fragmento, útil para detectar cambios.
+    pub content_hash: String,
     /// Texto del fragmento.
     pub content: String,
     /// Metadatos de origen.

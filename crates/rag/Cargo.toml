@@ -11,3 +11,5 @@ homepage.workspace = true
 
 [dependencies]
 serde.workspace = true
+pulldown-cmark.workspace = true
+blake3.workspace = true
