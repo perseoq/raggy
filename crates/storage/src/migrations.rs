@@ -41,10 +41,15 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "citas por mensaje del asistente",
         sql: include_str!("../migrations/0004_message_citations.sql"),
     },
+    Migration {
+        version: 5,
+        description: "proveedor de respaldo por sesión",
+        sql: include_str!("../migrations/0005_session_fallback.sql"),
+    },
 ];
 
 /// Versión de esquema que espera este binario.
-pub const LATEST_SCHEMA_VERSION: i64 = 4;
+pub const LATEST_SCHEMA_VERSION: i64 = 5;
 
 /// Aplica todas las migraciones pendientes dentro de una transacción.
 pub fn apply(conn: &mut Connection) -> Result<i64> {

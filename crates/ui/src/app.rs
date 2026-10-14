@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -11,8 +12,8 @@ use raggy_core::chat::{compose_request, context_from_retrieved};
 use raggy_core::index::{IndexEvent, IndexOptions, IndexPhase, IndexWorker};
 use raggy_core::watch::FolderWatcher;
 use raggy_core::{
-    search_folder, AppConfig, AppPaths, ChatEvent, ChatWorker, ProviderFactory, RagConfig,
-    APP_NAME, APP_VERSION,
+    search_folder, AppConfig, AppPaths, ChatEvent, ChatWorker, KeyringStore, ProviderFactory,
+    RagConfig, SecretStore, APP_NAME, APP_VERSION,
 };
 use raggy_llm::ProviderId;
 use raggy_rag::{Chunk, ChunkingOptions, RetrievedChunk, RetrieverOptions};
@@ -20,6 +21,36 @@ use raggy_storage::{Document, Folder, Message, Session, Storage};
 
 /// Tiempo de espera antes de reindexar tras un cambio detectado en disco.
 const REINDEX_DEBOUNCE: Duration = Duration::from_millis(1200);
+
+/// Estado de una clave de API en la interfaz (HU-23, HU-24).
+#[derive(Clone)]
+enum KeyStatus {
+    /// No hay clave configurada.
+    Missing,
+    /// Clave guardada en el llavero del sistema (enmascarada).
+    Stored { masked: String },
+    /// Clave tomada de una variable de entorno.
+    Environment { env_var: &'static str },
+    /// Comprobación de conexión en curso.
+    Testing,
+    /// Conexión correcta con los modelos disponibles.
+    Ok { count: usize, sample: String },
+    /// Error de conexión o del almacén.
+    Error(String),
+}
+
+/// Acciones del panel de claves.
+enum KeyAction {
+    Save(ProviderId),
+    Delete(ProviderId),
+    Test(ProviderId),
+}
+
+/// Fallo de generación recordado para ofrecer el respaldo (HU-25).
+struct Failure {
+    session_id: String,
+    availability: bool,
+}
 
 /// Estado de una carpeta en la interfaz.
 struct FolderEntry {
@@ -48,6 +79,7 @@ struct TopActions {
     add: bool,
     reindex_all: bool,
     settings: bool,
+    keys: bool,
 }
 
 /// Acciones solicitadas desde el panel lateral.
@@ -70,6 +102,9 @@ enum CentralAction {
     SendMessage,
     StopGeneration,
     UpdateModel { provider: ProviderId, model: String },
+    UpdateFallback { provider: Option<ProviderId> },
+    RetryWithFallback,
+    OpenKeys,
 }
 
 /// Estado raíz de la interfaz.
@@ -99,6 +134,14 @@ pub struct RaggyApp {
     session_dialog: Option<SessionDialog>,
     settings_open: bool,
     settings_draft: RagConfig,
+    secrets: Arc<dyn SecretStore>,
+    keyring_available: bool,
+    keys_open: bool,
+    key_inputs: HashMap<ProviderId, String>,
+    key_status: HashMap<ProviderId, KeyStatus>,
+    test_tx: Sender<(ProviderId, Result<Vec<String>, String>)>,
+    test_rx: Receiver<(ProviderId, Result<Vec<String>, String>)>,
+    last_failure: Option<Failure>,
     status: String,
     fatal: Option<String>,
 }
@@ -108,6 +151,9 @@ impl RaggyApp {
     pub fn new(ctx: &eframe::CreationContext<'_>, config: AppConfig, paths: AppPaths) -> Self {
         crate::theme::apply(ctx, config.theme);
         let settings_draft = config.rag.clone();
+        let secrets: Arc<dyn SecretStore> = Arc::new(KeyringStore::new());
+        let keyring_available = KeyringStore::is_available();
+        let (test_tx, test_rx) = mpsc::channel();
 
         let mut app = Self {
             config,
@@ -135,6 +181,14 @@ impl RaggyApp {
             session_dialog: None,
             settings_open: false,
             settings_draft,
+            secrets,
+            keyring_available,
+            keys_open: false,
+            key_inputs: HashMap::new(),
+            key_status: HashMap::new(),
+            test_tx,
+            test_rx,
+            last_failure: None,
             status: String::new(),
             fatal: None,
         };
@@ -152,7 +206,21 @@ impl RaggyApp {
             Err(error) => app.fatal = Some(format!("No se pudo iniciar el indexador: {error}")),
         }
 
-        let factory: ProviderFactory = Arc::new(raggy_llm::from_env);
+        let factory_secrets = Arc::clone(&app.secrets);
+        let factory: ProviderFactory = Arc::new(move |id| {
+            let key = factory_secrets
+                .get(id)
+                .ok()
+                .flatten()
+                .or_else(|| raggy_llm::api_key(id));
+            match key {
+                Some(key) => raggy_llm::from_api_key(id, key),
+                None => Err(raggy_llm::ProviderError::MissingApiKey {
+                    provider: id.display_name(),
+                    env_var: id.api_key_env(),
+                }),
+            }
+        });
         match ChatWorker::spawn(app.paths.db_path(), factory) {
             Ok(worker) => app.chat_worker = Some(worker),
             Err(error) => app.fatal = Some(format!("No se pudo iniciar el chat: {error}")),
@@ -165,7 +233,118 @@ impl RaggyApp {
 
         app.reload_folders();
         app.sync_watcher();
+        app.refresh_keys();
         app
+    }
+
+    // --------------------------------------------------------------- claves
+
+    /// Recalcula el estado de las claves de cada proveedor (HU-23).
+    fn refresh_keys(&mut self) {
+        for provider in ProviderId::ALL {
+            let status = match self.secrets.get(provider) {
+                Ok(Some(secret)) => KeyStatus::Stored {
+                    masked: raggy_core::secrets::mask(&secret),
+                },
+                Ok(None) => {
+                    if raggy_llm::api_key(provider).is_some() {
+                        KeyStatus::Environment {
+                            env_var: provider.api_key_env(),
+                        }
+                    } else {
+                        KeyStatus::Missing
+                    }
+                }
+                Err(error) => KeyStatus::Error(error.to_string()),
+            };
+            self.key_status.insert(provider, status);
+        }
+    }
+
+    fn save_key(&mut self, provider: ProviderId) {
+        let secret = self
+            .key_inputs
+            .get(&provider)
+            .map(|value| value.trim().to_string())
+            .unwrap_or_default();
+
+        if secret.is_empty() {
+            self.key_status.insert(
+                provider,
+                KeyStatus::Error("introduce una clave antes de guardar".to_string()),
+            );
+            return;
+        }
+
+        match self.secrets.set(provider, &secret) {
+            Ok(()) => {
+                self.key_inputs.remove(&provider);
+                self.refresh_keys();
+                self.status = format!(
+                    "Clave de {} guardada en el llavero.",
+                    provider.display_name()
+                );
+            }
+            Err(error) => {
+                self.key_status
+                    .insert(provider, KeyStatus::Error(error.to_string()));
+            }
+        }
+    }
+
+    fn delete_key(&mut self, provider: ProviderId) {
+        match self.secrets.delete(provider) {
+            Ok(()) => {
+                self.refresh_keys();
+                self.status = format!("Clave de {} eliminada.", provider.display_name());
+            }
+            Err(error) => {
+                self.key_status
+                    .insert(provider, KeyStatus::Error(error.to_string()));
+            }
+        }
+    }
+
+    fn test_key(&mut self, provider: ProviderId) {
+        let key = self
+            .secrets
+            .get(provider)
+            .ok()
+            .flatten()
+            .or_else(|| raggy_llm::api_key(provider));
+
+        let Some(key) = key else {
+            self.key_status.insert(
+                provider,
+                KeyStatus::Error(format!(
+                    "no hay clave para {} (define {})",
+                    provider.display_name(),
+                    provider.api_key_env()
+                )),
+            );
+            return;
+        };
+
+        self.key_status.insert(provider, KeyStatus::Testing);
+        let sender = self.test_tx.clone();
+        std::thread::spawn(move || {
+            let result = raggy_llm::check_connection_with_key(provider, &key)
+                .map_err(|error| error.to_string());
+            let _ = sender.send((provider, result));
+        });
+    }
+
+    fn drain_key_tests(&mut self) {
+        for (provider, result) in self.test_rx.try_iter() {
+            let status = match result {
+                Ok(models) => KeyStatus::Ok {
+                    count: models.len(),
+                    sample: models.first().cloned().unwrap_or_default(),
+                },
+                Err(message) => KeyStatus::Error(message),
+            };
+            self.key_status.insert(provider, status);
+        }
     }
 
     // ---------------------------------------------------------- configuración
@@ -389,6 +568,24 @@ impl RaggyApp {
         self.reload_sessions();
     }
 
+    fn set_session_fallback(&mut self, provider: Option<ProviderId>) {
+        let Some(session) = self.active_session.clone() else {
+            return;
+        };
+        let Some(storage) = &self.storage else {
+            return;
+        };
+        let key = provider.map(ProviderId::key);
+        if let Err(error) = storage.set_session_fallback(&session.id, key) {
+            self.status = format!("No se pudo guardar el respaldo: {error}");
+            return;
+        }
+        if let Some(active) = self.active_session.as_mut() {
+            active.fallback_provider = key.map(str::to_string);
+        }
+        self.reload_sessions();
+    }
+
     fn reload_messages(&mut self, session_id: &str) {
         if self
             .active_session
@@ -409,14 +606,53 @@ impl RaggyApp {
         if self.streaming.is_some() {
             return;
         }
-        let Some(session) = self.active_session.clone() else {
-            return;
-        };
         let content = self.chat_input.trim().to_string();
         if content.is_empty() {
             return;
         }
 
+        let history = self.messages.clone();
+        self.chat_input.clear();
+        self.start_generation(content, history, true);
+    }
+
+    /// Reintenta el último mensaje del usuario con el proveedor de respaldo
+    /// (HU-25). No persiste un mensaje nuevo.
+    fn retry_with_fallback(&mut self) {
+        let Some(session) = self.active_session.clone() else {
+            return;
+        };
+        let Some(fallback) = session
+            .fallback_provider
+            .as_deref()
+            .and_then(ProviderId::from_key)
+        else {
+            return;
+        };
+
+        self.update_session_model(fallback, fallback.default_model().to_string());
+
+        let mut history = self.messages.clone();
+        let Some(prompt) = history
+            .iter()
+            .rposition(|message| message.role == "user")
+            .map(|position| {
+                let content = history[position].content.clone();
+                history.truncate(position);
+                content
+            })
+        else {
+            return;
+        };
+
+        self.status = format!("Reintentando con {}.", fallback.display_name());
+        self.start_generation(prompt, history, false);
+    }
+
+    fn start_generation(&mut self, prompt: String, history: Vec<Message>, persist_user: bool) {
+        let Some(session) = self.active_session.clone() else {
+            return;
+        };
         let provider = ProviderId::from_key(&session.provider).unwrap_or(ProviderId::DeepSeek);
 
         // El contexto se recupera solo de la carpeta de la sesión (HU-06).
@@ -424,7 +660,7 @@ impl RaggyApp {
         let dimensions = self.config.rag.embedding_dimensions;
         let (blocks, citations) = match &self.storage {
             Some(storage) => {
-                match search_folder(storage, &session.folder_id, &content, &options, dimensions) {
+                match search_folder(storage, &session.folder_id, &prompt, &options, dimensions) {
                     Ok(chunks) => context_from_retrieved(&chunks),
                     Err(error) => {
                         self.chat_error = Some(format!("Error al recuperar contexto: {error}"));
@@ -440,22 +676,24 @@ impl RaggyApp {
             self.config.model.temperature,
             self.config.model.max_tokens,
             &blocks,
-            &self.messages,
-            &content,
+            &history,
+            &prompt,
         );
 
-        if let Some(storage) = &self.storage {
-            let user_message = Message::new(&session.id, "user", &content, true, Vec::new());
-            if let Err(error) = storage.add_message(&user_message) {
-                self.chat_error = Some(format!("No se pudo guardar el mensaje: {error}"));
-                return;
+        if persist_user {
+            if let Some(storage) = &self.storage {
+                let user_message = Message::new(&session.id, "user", &prompt, true, Vec::new());
+                if let Err(error) = storage.add_message(&user_message) {
+                    self.chat_error = Some(format!("No se pudo guardar el mensaje: {error}"));
+                    return;
+                }
+                let _ = storage.touch_session(&session.id);
+                self.messages = storage.list_messages(&session.id).unwrap_or_default();
             }
-            let _ = storage.touch_session(&session.id);
-            self.messages = storage.list_messages(&session.id).unwrap_or_default();
         }
 
-        self.chat_input.clear();
         self.chat_error = None;
+        self.last_failure = None;
         self.streaming = Some(StreamingState {
             session_id: session.id.clone(),
             text: String::new(),
@@ -485,14 +723,20 @@ impl RaggyApp {
                 }
                 ChatEvent::Finished { session_id, .. } => {
                     self.streaming = None;
+                    self.last_failure = None;
                     self.reload_messages(&session_id);
                 }
                 ChatEvent::Failed {
                     session_id,
                     message,
+                    availability,
                 } => {
                     self.streaming = None;
                     self.chat_error = Some(message);
+                    self.last_failure = Some(Failure {
+                        session_id: session_id.clone(),
+                        availability,
+                    });
                     self.reload_messages(&session_id);
                 }
             }
@@ -716,7 +960,7 @@ impl RaggyApp {
             ui.horizontal(|ui| {
                 ui.heading(APP_NAME);
                 ui.separator();
-                ui.label(format!("v{APP_VERSION} · Fase 3"));
+                ui.label(format!("v{APP_VERSION} · Fase 4"));
                 ui.separator();
                 if ui.button("Añadir carpeta").clicked() {
                     actions.add = true;
@@ -726,6 +970,9 @@ impl RaggyApp {
                 }
                 if ui.button("Configuración").clicked() {
                     actions.settings = true;
+                }
+                if ui.button("Claves de API").clicked() {
+                    actions.keys = true;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(format!("Datos: {}", data_dir.display()));
@@ -1033,11 +1280,46 @@ impl RaggyApp {
                 });
             }
 
-            if !raggy_llm::is_configured(provider) {
+            ui.separator();
+            let mut selected_fallback = session
+                .fallback_provider
+                .as_deref()
+                .and_then(ProviderId::from_key);
+            egui::ComboBox::from_id_salt("fallback_selector")
+                .selected_text(match selected_fallback {
+                    Some(fallback) => format!("Respaldo: {}", fallback.display_name()),
+                    None => "Sin respaldo".to_string(),
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut selected_fallback, None, "Sin respaldo");
+                    for candidate in ProviderId::ALL {
+                        if candidate != provider {
+                            ui.selectable_value(
+                                &mut selected_fallback,
+                                Some(candidate),
+                                candidate.display_name(),
+                            );
+                        }
+                    }
+                });
+            let previous_fallback = session
+                .fallback_provider
+                .as_deref()
+                .and_then(ProviderId::from_key);
+            if selected_fallback != previous_fallback {
+                actions.push(CentralAction::UpdateFallback {
+                    provider: selected_fallback,
+                });
+            }
+
+            if !self.provider_ready(provider) {
                 ui.colored_label(
                     egui::Color32::from_rgb(200, 140, 0),
                     format!("Sin API Key ({})", provider.api_key_env()),
                 );
+                if ui.small_button("Configurar").clicked() {
+                    actions.push(CentralAction::OpenKeys);
+                }
             }
         });
         ui.separator();
@@ -1108,9 +1390,37 @@ impl RaggyApp {
 
         if let Some(error) = &self.chat_error {
             ui.colored_label(egui::Color32::RED, error);
+
+            let fallback = session
+                .fallback_provider
+                .as_deref()
+                .and_then(ProviderId::from_key);
+            let offer_fallback =
+                self.last_failure.as_ref().is_some_and(|failure| {
+                    failure.session_id == session.id && failure.availability
+                }) && fallback.is_some();
+
+            if offer_fallback {
+                if let Some(fallback) = fallback {
+                    if ui
+                        .button(format!("Usar {} y reintentar", fallback.display_name()))
+                        .clicked()
+                    {
+                        actions.push(CentralAction::RetryWithFallback);
+                    }
+                }
+            }
         }
 
         actions
+    }
+
+    /// ¿El proveedor tiene credenciales listas para usar? (según la caché de claves)
+    fn provider_ready(&self, provider: ProviderId) -> bool {
+        matches!(
+            self.key_status.get(&provider),
+            Some(KeyStatus::Stored { .. } | KeyStatus::Environment { .. } | KeyStatus::Ok { .. })
+        )
     }
 
     fn chunks_panel(&self, ui: &mut egui::Ui) {
@@ -1265,6 +1575,92 @@ impl RaggyApp {
         }
     }
 
+    fn keys_window(&mut self, ctx: &egui::Context) {
+        if !self.keys_open {
+            return;
+        }
+
+        let mut open = true;
+        let mut actions: Vec<KeyAction> = Vec::new();
+        let statuses = self.key_status.clone();
+        let keyring_available = self.keyring_available;
+
+        egui::Window::new("Claves de API")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_width(660.0)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                if !keyring_available {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(200, 140, 0),
+                        "El llavero del sistema no está disponible; se usarán las variables de entorno.",
+                    );
+                }
+                ui.small(
+                    "Las claves se guardan cifradas en el almacén del sistema operativo \
+                     y nunca se muestran completas.",
+                );
+                ui.add_space(8.0);
+
+                egui::Grid::new("keys_grid")
+                    .num_columns(3)
+                    .spacing([10.0, 10.0])
+                    .show(ui, |ui| {
+                        for provider in ProviderId::ALL {
+                            ui.vertical(|ui| {
+                                ui.strong(provider.display_name());
+                                ui.small(key_status_text(statuses.get(&provider)));
+                            });
+
+                            let input = self.key_inputs.entry(provider).or_default();
+                            ui.add(
+                                egui::TextEdit::singleline(input)
+                                    .password(true)
+                                    .desired_width(220.0)
+                                    .hint_text("pega la clave"),
+                            );
+
+                            ui.horizontal(|ui| {
+                                if ui.button("Guardar").clicked() {
+                                    actions.push(KeyAction::Save(provider));
+                                }
+                                if ui.button("Probar").clicked() {
+                                    actions.push(KeyAction::Test(provider));
+                                }
+                                if ui.button("Eliminar").clicked() {
+                                    actions.push(KeyAction::Delete(provider));
+                                }
+                            });
+                            ui.end_row();
+                        }
+                    });
+
+                ui.add_space(8.0);
+                let env_vars: Vec<&str> = ProviderId::ALL
+                    .iter()
+                    .map(|provider| provider.api_key_env())
+                    .collect();
+                ui.small(format!(
+                    "Alternativa sin llavero: define {} antes de abrir la aplicación.",
+                    env_vars.join(", ")
+                ));
+            });
+
+        for action in actions {
+            match action {
+                KeyAction::Save(provider) => self.save_key(provider),
+                KeyAction::Delete(provider) => self.delete_key(provider),
+                KeyAction::Test(provider) => self.test_key(provider),
+            }
+        }
+
+        if !open {
+            self.keys_open = false;
+        }
+    }
+
     fn settings_window(&mut self, ctx: &egui::Context) {
         if !self.settings_open {
             return;
@@ -1364,6 +1760,10 @@ impl RaggyApp {
             self.settings_draft = self.config.rag.clone();
             self.settings_open = true;
         }
+        if actions.keys {
+            self.refresh_keys();
+            self.keys_open = true;
+        }
 
         let sidebar = Self::sidebar(
             ui,
@@ -1422,6 +1822,14 @@ impl RaggyApp {
                 CentralAction::UpdateModel { provider, model } => {
                     self.update_session_model(provider, model);
                 }
+                CentralAction::UpdateFallback { provider } => {
+                    self.set_session_fallback(provider);
+                }
+                CentralAction::RetryWithFallback => self.retry_with_fallback(),
+                CentralAction::OpenKeys => {
+                    self.refresh_keys();
+                    self.keys_open = true;
+                }
             }
         }
     }
@@ -1471,6 +1879,7 @@ impl eframe::App for RaggyApp {
 
         self.drain_events();
         self.drain_chat_events();
+        self.drain_key_tests();
         self.poll_watcher();
         if self.worker.is_some() || self.chat_worker.is_some() || self.watcher.is_some() {
             ctx.request_repaint_after(Duration::from_millis(120));
@@ -1480,6 +1889,7 @@ impl eframe::App for RaggyApp {
         self.delete_dialog(&ctx);
         self.session_dialog_window(&ctx);
         self.settings_window(&ctx);
+        self.keys_window(&ctx);
     }
 
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {
@@ -1509,6 +1919,23 @@ fn snippet(content: &str) -> String {
         snippet.push('…');
     }
     snippet
+}
+
+/// Texto descriptivo del estado de una clave de API (HU-23, HU-24).
+fn key_status_text(status: Option<&KeyStatus>) -> String {
+    match status {
+        Some(KeyStatus::Stored { masked }) => format!("Guardada · {masked}"),
+        Some(KeyStatus::Environment { env_var }) => format!("Desde la variable {env_var}"),
+        Some(KeyStatus::Testing) => "Comprobando…".to_string(),
+        Some(KeyStatus::Ok { count, sample }) if sample.is_empty() => {
+            format!("Conexión correcta · {count} modelos")
+        }
+        Some(KeyStatus::Ok { count, sample }) => {
+            format!("Conexión correcta · {count} modelos (p. ej. {sample})")
+        }
+        Some(KeyStatus::Error(message)) => format!("Error: {message}"),
+        Some(KeyStatus::Missing) | None => "Sin configurar".to_string(),
+    }
 }
 
 #[cfg(test)]

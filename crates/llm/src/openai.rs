@@ -5,6 +5,7 @@ use std::io::{BufRead, BufReader};
 use std::time::Duration;
 
 use reqwest::blocking::Client;
+use reqwest::StatusCode;
 use serde_json::json;
 
 use crate::provider::{ChatDelta, LlmProvider, ProviderError, ProviderId};
@@ -33,8 +34,8 @@ impl OpenAiCompatibleProvider {
         })
     }
 
-    fn endpoint(&self) -> String {
-        format!("{}/chat/completions", self.base_url)
+    fn endpoint(&self, path: &str) -> String {
+        format!("{}/{}", self.base_url, path)
     }
 }
 
@@ -53,7 +54,7 @@ pub(crate) fn build_client() -> Result<Client, ProviderError> {
     Client::builder()
         .connect_timeout(Duration::from_secs(15))
         .build()
-        .map_err(|error| ProviderError::Http(error.to_string()))
+        .map_err(|error| ProviderError::Protocol(error.to_string()))
 }
 
 impl LlmProvider for OpenAiCompatibleProvider {
@@ -69,6 +70,26 @@ impl LlmProvider for OpenAiCompatibleProvider {
             });
         }
         Ok(())
+    }
+
+    fn check_connection(&self) -> Result<Vec<String>, ProviderError> {
+        let response = self
+            .client
+            .get(self.endpoint("models"))
+            .bearer_auth(&self.api_key)
+            .send()
+            .map_err(|error| unavailable(self.id, &error))?;
+
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        if !status.is_success() {
+            return Err(describe_status(self.id, status, &body));
+        }
+
+        let value: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|error| ProviderError::Protocol(error.to_string()))?;
+
+        Ok(model_ids(&value))
     }
 
     fn stream_chat(
@@ -92,23 +113,23 @@ impl LlmProvider for OpenAiCompatibleProvider {
 
         let response = self
             .client
-            .post(self.endpoint())
+            .post(self.endpoint("chat/completions"))
             .bearer_auth(&self.api_key)
             .json(&body)
             .send()
-            .map_err(|error| ProviderError::Http(error.to_string()))?;
+            .map_err(|error| unavailable(self.id, &error))?;
 
         let status = response.status();
         if !status.is_success() {
             let text = response.text().unwrap_or_default();
-            return Err(ProviderError::Http(format!(
-                "HTTP {status}: {}",
-                shorten(&text)
-            )));
+            return Err(describe_status(self.id, status, &text));
         }
 
         for line in BufReader::new(response).lines() {
-            let line = line.map_err(|error| ProviderError::Http(error.to_string()))?;
+            let line = line.map_err(|error| ProviderError::Unavailable {
+                provider: self.id.display_name(),
+                message: format!("la conexión se interrumpió: {error}"),
+            })?;
             let Some(data) = sse::data_of(&line) else {
                 continue;
             };
@@ -120,7 +141,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
                 .map_err(|error| ProviderError::Protocol(error.to_string()))?;
 
             if let Some(error) = value.get("error") {
-                return Err(ProviderError::Http(shorten(&error.to_string())));
+                return Err(describe_stream_error(self.id, error));
             }
 
             if let Some(text) = delta_content(&value) {
@@ -144,6 +165,80 @@ fn delta_content(value: &serde_json::Value) -> Option<&str> {
         .get("delta")?
         .get("content")?
         .as_str()
+}
+
+/// Extrae los identificadores de modelo de la respuesta de `/models`.
+pub(crate) fn model_ids(value: &serde_json::Value) -> Vec<String> {
+    value
+        .get("data")
+        .and_then(|data| data.as_array())
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|model| model.get("id").and_then(|id| id.as_str()))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Traduce un error de red a un fallo de disponibilidad.
+pub(crate) fn unavailable(id: ProviderId, error: &reqwest::Error) -> ProviderError {
+    ProviderError::Unavailable {
+        provider: id.display_name(),
+        message: if error.is_timeout() {
+            "la conexión ha caducado".to_string()
+        } else if error.is_connect() {
+            "no se pudo conectar (comprueba tu red)".to_string()
+        } else {
+            shorten(&error.to_string())
+        },
+    }
+}
+
+/// Traduce un código de estado HTTP a un mensaje claro (HU-24).
+pub(crate) fn describe_status(id: ProviderId, status: StatusCode, body: &str) -> ProviderError {
+    let provider = id.display_name();
+    match status.as_u16() {
+        401 | 403 => ProviderError::Http {
+            provider,
+            message: format!("API Key inválida o sin permisos (HTTP {status})"),
+        },
+        402 => ProviderError::Http {
+            provider,
+            message: "la cuenta no tiene crédito suficiente (HTTP 402)".to_string(),
+        },
+        404 => ProviderError::Http {
+            provider,
+            message: format!("recurso no encontrado, revisa el modelo o la URL (HTTP {status})"),
+        },
+        429 => ProviderError::Unavailable {
+            provider,
+            message: "se ha alcanzado el límite de peticiones (HTTP 429)".to_string(),
+        },
+        code if (500..=599).contains(&code) => ProviderError::Unavailable {
+            provider,
+            message: format!("el proveedor no está disponible (HTTP {status})"),
+        },
+        _ => ProviderError::Http {
+            provider,
+            message: format!("HTTP {status}: {}", shorten(body)),
+        },
+    }
+}
+
+/// Traduce un error embebido en el stream a un error tipado.
+fn describe_stream_error(id: ProviderId, error: &serde_json::Value) -> ProviderError {
+    let message = error
+        .get("message")
+        .and_then(|message| message.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| shorten(&error.to_string()));
+
+    ProviderError::Http {
+        provider: id.display_name(),
+        message,
+    }
 }
 
 /// Recorta un mensaje de error para mostrarlo de forma legible.
@@ -179,6 +274,30 @@ mod tests {
 
         let empty: serde_json::Value = serde_json::from_str(r#"{"choices":[]}"#).expect("json");
         assert_eq!(delta_content(&empty), None);
+    }
+
+    #[test]
+    fn extrae_identificadores_de_modelo() {
+        let value: serde_json::Value =
+            serde_json::from_str(r#"{"data":[{"id":"a"},{"id":"b"}]}"#).expect("json");
+        assert_eq!(model_ids(&value), vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn traduce_los_errores_http() {
+        let id = ProviderId::OpenAi;
+
+        assert!(matches!(
+            describe_status(id, StatusCode::UNAUTHORIZED, ""),
+            ProviderError::Http { .. }
+        ));
+        assert!(!describe_status(id, StatusCode::UNAUTHORIZED, "").is_availability());
+
+        let limit = describe_status(id, StatusCode::TOO_MANY_REQUESTS, "");
+        assert!(limit.is_availability());
+
+        let server = describe_status(id, StatusCode::BAD_GATEWAY, "");
+        assert!(server.is_availability());
     }
 
     #[test]

@@ -51,6 +51,10 @@ impl LlmProvider for MockProvider {
         Ok(())
     }
 
+    fn check_connection(&self) -> Result<Vec<String>, ProviderError> {
+        Ok(vec!["mock-model".to_string()])
+    }
+
     fn stream_chat(
         &self,
         request: &ChatRequest,

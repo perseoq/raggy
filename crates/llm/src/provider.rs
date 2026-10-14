@@ -49,7 +49,7 @@ impl ProviderId {
         }
     }
 
-    /// Variable de entorno de la que se lee la API Key.
+    /// Variable de entorno usada como alternativa al llavero del sistema.
     pub fn api_key_env(self) -> &'static str {
         match self {
             ProviderId::OpenAi => "OPENAI_API_KEY",
@@ -121,9 +121,25 @@ pub enum ProviderError {
         provider: &'static str,
     },
 
-    /// Error de transporte con el proveedor.
-    #[error("error de red con el proveedor: {0}")]
-    Http(String),
+    /// El proveedor no responde (red, rate limit o error del servidor).
+    ///
+    /// Importa para HU-25: solo estos fallos ofrecen el proveedor de respaldo.
+    #[error("el proveedor `{provider}` no está disponible: {message}")]
+    Unavailable {
+        /// Nombre del proveedor.
+        provider: &'static str,
+        /// Detalle del problema.
+        message: String,
+    },
+
+    /// Error de la API del proveedor (clave inválida, petición inválida, etc.).
+    #[error("error del proveedor `{provider}`: {message}")]
+    Http {
+        /// Nombre del proveedor.
+        provider: &'static str,
+        /// Detalle del problema.
+        message: String,
+    },
 
     /// Respuesta inesperada del proveedor.
     #[error("respuesta inesperada del proveedor: {0}")]
@@ -132,6 +148,13 @@ pub enum ProviderError {
     /// El usuario detuvo la generación (HU-12).
     #[error("generación detenida por el usuario")]
     Cancelled,
+}
+
+impl ProviderError {
+    /// ¿Es un fallo de disponibilidad del proveedor? (HU-25)
+    pub fn is_availability(&self) -> bool {
+        matches!(self, ProviderError::Unavailable { .. })
+    }
 }
 
 /// Contrato que cumple cada adaptador de proveedor.
@@ -146,6 +169,9 @@ pub trait LlmProvider: Send + Sync {
 
     /// Verifica que la configuración permite usar el proveedor (HU-24).
     fn check(&self) -> Result<(), ProviderError>;
+
+    /// Comprueba la conexión y devuelve los modelos disponibles (HU-24).
+    fn check_connection(&self) -> Result<Vec<String>, ProviderError>;
 
     /// Genera una respuesta en streaming (HU-12).
     ///
@@ -165,17 +191,22 @@ pub fn api_key(id: ProviderId) -> Option<String> {
         .filter(|value| !value.trim().is_empty())
 }
 
-/// ¿Hay credenciales configuradas para el proveedor?
+/// ¿Hay credenciales configuradas en el entorno para el proveedor?
 pub fn is_configured(id: ProviderId) -> bool {
     api_key(id).is_some()
 }
 
-/// Crea el adaptador del proveedor leyendo su API Key del entorno.
-pub fn from_env(id: ProviderId) -> Result<Box<dyn LlmProvider>, ProviderError> {
-    let api_key = api_key(id).ok_or(ProviderError::MissingApiKey {
-        provider: id.display_name(),
-        env_var: id.api_key_env(),
-    })?;
+/// Crea el adaptador del proveedor a partir de su API Key.
+pub fn from_api_key(
+    id: ProviderId,
+    api_key: String,
+) -> Result<Box<dyn LlmProvider>, ProviderError> {
+    if api_key.trim().is_empty() {
+        return Err(ProviderError::MissingApiKey {
+            provider: id.display_name(),
+            env_var: id.api_key_env(),
+        });
+    }
 
     let provider: Box<dyn LlmProvider> = match id {
         ProviderId::Anthropic => Box::new(AnthropicProvider::new(api_key)?),
@@ -184,6 +215,23 @@ pub fn from_env(id: ProviderId) -> Result<Box<dyn LlmProvider>, ProviderError> {
         }
     };
     Ok(provider)
+}
+
+/// Crea el adaptador del proveedor leyendo su API Key del entorno.
+pub fn from_env(id: ProviderId) -> Result<Box<dyn LlmProvider>, ProviderError> {
+    let api_key = api_key(id).ok_or(ProviderError::MissingApiKey {
+        provider: id.display_name(),
+        env_var: id.api_key_env(),
+    })?;
+    from_api_key(id, api_key)
+}
+
+/// Realiza una llamada mínima para validar una API Key (HU-24).
+pub fn check_connection_with_key(
+    id: ProviderId,
+    api_key: &str,
+) -> Result<Vec<String>, ProviderError> {
+    from_api_key(id, api_key.to_string())?.check_connection()
 }
 
 #[cfg(test)]
@@ -200,13 +248,27 @@ mod tests {
 
     #[test]
     fn sin_api_key_informa_del_error() {
-        // Se usa una variable improbable para no depender del entorno real.
-        let id = ProviderId::OpenAi;
-        if api_key(id).is_none() {
-            match from_env(id) {
-                Err(error) => assert!(matches!(error, ProviderError::MissingApiKey { .. })),
-                Ok(_) => panic!("debería faltar la clave"),
+        match from_api_key(ProviderId::OpenAi, String::new()) {
+            Err(error) => {
+                assert!(matches!(error, ProviderError::MissingApiKey { .. }));
+                assert!(!error.is_availability());
             }
+            Ok(_) => panic!("debería faltar la clave"),
         }
+    }
+
+    #[test]
+    fn clasifica_los_fallos_de_disponibilidad() {
+        let unavailable = ProviderError::Unavailable {
+            provider: "OpenAI",
+            message: "HTTP 503".to_string(),
+        };
+        assert!(unavailable.is_availability());
+
+        let invalid = ProviderError::Http {
+            provider: "OpenAI",
+            message: "HTTP 401".to_string(),
+        };
+        assert!(!invalid.is_availability());
     }
 }

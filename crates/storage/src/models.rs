@@ -87,6 +87,8 @@ pub struct Session {
     pub provider: String,
     /// Modelo seleccionado.
     pub model: String,
+    /// Proveedor de respaldo ofrecido si el principal falla (HU-25).
+    pub fallback_provider: Option<String>,
     /// Fecha de creación en RFC 3339.
     pub created_at: String,
     /// Fecha de última actualización en RFC 3339.
@@ -107,6 +109,7 @@ impl Session {
             title: now.format("%Y-%m-%d %H:%M").to_string(),
             provider: provider.into(),
             model: model.into(),
+            fallback_provider: None,
             created_at: now.to_rfc3339(),
             updated_at: now.to_rfc3339(),
         }

@@ -18,6 +18,7 @@ pub use mock::MockProvider;
 pub use openai::OpenAiCompatibleProvider;
 pub use prompt::{build_system_prompt, ContextBlock, STRICT_SYSTEM_PROMPT};
 pub use provider::{
-    api_key, from_env, is_configured, ChatDelta, LlmProvider, ProviderError, ProviderId,
+    api_key, check_connection_with_key, from_api_key, from_env, is_configured, ChatDelta,
+    LlmProvider, ProviderError, ProviderId,
 };
 pub use types::{ChatMessage, ChatRequest, Role};

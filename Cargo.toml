@@ -61,6 +61,7 @@ reqwest = { version = "0.13", default-features = false, features = [
     "json",
     "rustls",
 ] }
+keyring = "4.2"
 
 # --- interfaz gráfica ---
 eframe = { version = "0.36", default-features = false, features = [

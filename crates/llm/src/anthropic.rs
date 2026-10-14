@@ -5,12 +5,12 @@ use std::io::{BufRead, BufReader};
 use reqwest::blocking::Client;
 use serde_json::json;
 
-use crate::openai::{build_client, shorten};
+use crate::openai::{build_client, describe_status, model_ids, shorten, unavailable};
 use crate::provider::{ChatDelta, LlmProvider, ProviderError, ProviderId};
 use crate::sse;
 use crate::types::{ChatRequest, Role};
 
-const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 
 /// Cliente para la API de Anthropic.
@@ -26,6 +26,10 @@ impl AnthropicProvider {
             api_key,
             client: build_client()?,
         })
+    }
+
+    fn endpoint(&self, path: &str) -> String {
+        format!("{ANTHROPIC_URL}/{path}")
     }
 }
 
@@ -44,11 +48,34 @@ impl LlmProvider for AnthropicProvider {
         Ok(())
     }
 
+    fn check_connection(&self) -> Result<Vec<String>, ProviderError> {
+        let id = ProviderId::Anthropic;
+        let response = self
+            .client
+            .get(self.endpoint("models"))
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", ANTHROPIC_VERSION)
+            .send()
+            .map_err(|error| unavailable(id, &error))?;
+
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        if !status.is_success() {
+            return Err(describe_status(id, status, &body));
+        }
+
+        let value: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|error| ProviderError::Protocol(error.to_string()))?;
+        Ok(model_ids(&value))
+    }
+
     fn stream_chat(
         &self,
         request: &ChatRequest,
         on_delta: &mut dyn FnMut(ChatDelta) -> bool,
     ) -> Result<(), ProviderError> {
+        let id = ProviderId::Anthropic;
+
         let system: String = request
             .messages
             .iter()
@@ -77,24 +104,24 @@ impl LlmProvider for AnthropicProvider {
 
         let response = self
             .client
-            .post(ANTHROPIC_URL)
+            .post(self.endpoint("messages"))
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
             .json(&body)
             .send()
-            .map_err(|error| ProviderError::Http(error.to_string()))?;
+            .map_err(|error| unavailable(id, &error))?;
 
         let status = response.status();
         if !status.is_success() {
             let text = response.text().unwrap_or_default();
-            return Err(ProviderError::Http(format!(
-                "HTTP {status}: {}",
-                shorten(&text)
-            )));
+            return Err(describe_status(id, status, &text));
         }
 
         for line in BufReader::new(response).lines() {
-            let line = line.map_err(|error| ProviderError::Http(error.to_string()))?;
+            let line = line.map_err(|error| ProviderError::Unavailable {
+                provider: id.display_name(),
+                message: format!("la conexión se interrumpió: {error}"),
+            })?;
             let Some(data) = sse::data_of(&line) else {
                 continue;
             };
@@ -110,7 +137,10 @@ impl LlmProvider for AnthropicProvider {
                 }
                 StreamEvent::Stop => break,
                 StreamEvent::Error(message) => {
-                    return Err(ProviderError::Http(shorten(&message)));
+                    return Err(ProviderError::Http {
+                        provider: id.display_name(),
+                        message: shorten(&message),
+                    });
                 }
                 StreamEvent::Ignore => {}
             }

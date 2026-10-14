@@ -5,10 +5,10 @@ a documentación Markdown local**. Indexas una carpeta, creas sesiones aisladas
 por carpeta y chateas con distintos proveedores de LLM (OpenAI, Anthropic,
 DeepSeek, OpenRouter), generando y descargando código trazable.
 
-> Estado: **Fase 3 completada** — además de indexar y buscar, ya se puede
-> chatear con el modelo en streaming sobre una sesión aislada por carpeta, con
-> respuestas ancladas al contexto recuperado y citas verificables. La gestión
-> de claves y el multi-proveedor completo llegan en la siguiente fase.
+> Estado: **Fase 4 completada** — las API Keys se guardan cifradas en el llavero
+> del sistema, se pueden probar las conexiones y cada sesión admite un proveedor
+> de respaldo. Quedan la generación/descarga de código y la memoria de proyecto
+> (Fase 5).
 
 ## Documentación
 
@@ -26,7 +26,7 @@ DeepSeek, OpenRouter), generando y descargando código trazable.
 | 1 | Carpetas e indexación: añadir, escanear, chunking, incremental, eliminar | ✅ |
 | 2 | Motor RAG: embeddings, índice vectorial y recuperación | ✅ |
 | 3 | Chat y sesiones por carpeta | ✅ |
-| 4 | Multi-proveedor y claves | pendiente |
+| 4 | Multi-proveedor: claves, prueba de conexión y fallback | ✅ |
 | 5 | Generación y descarga de código, memoria de proyecto | pendiente |
 | 6 | Configuración avanzada, seguridad, exportación y pulido | pendiente |
 
@@ -97,10 +97,30 @@ DeepSeek, OpenRouter), generando y descargando código trazable.
 - **Citas verificables** (HU-11): cada respuesta guarda y muestra sus fuentes;
   las citas son enlaces que abren el archivo y su fragmento.
 
-> Las API Keys se leen **por ahora** de las variables de entorno
+> Las API Keys se guardan **cifradas en el llavero del sistema** (Windows
+> Credential Manager, macOS Keychain o Secret Service en Linux). Como
+> alternativa, si no hay llavero disponible se leen de las variables de entorno
 > `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY` y
-> `OPENROUTER_API_KEY`. Su almacenamiento cifrado en el llavero del sistema
-> (HU-23) es el objetivo de la Fase 4.
+> `OPENROUTER_API_KEY`.
+
+### Fase 4 — claves, prueba de conexión y fallback (HU-23 a HU-25)
+
+- **Panel de claves de API** (HU-23): un campo por proveedor, guardado en el
+  **almacén de credenciales del sistema** (nunca en la configuración ni en la
+  base de datos) y **enmascarado** mostrando solo los últimos cuatro caracteres.
+- **Probar conexión** (HU-24) por proveedor, en segundo plano: hace una llamada
+  mínima, muestra cuántos modelos devuelve (con un ejemplo) y traduce los errores
+  comunes a mensajes claros (clave inválida, sin crédito, límite de peticiones,
+  proveedor caído).
+- **Proveedor de respaldo por sesión** (HU-25): si el proveedor activo falla por
+  disponibilidad, la interfaz lo avisa y ofrece un botón para cambiar y
+  reintentar. Nunca se cambia de proveedor sin consentimiento.
+- El chat ahora advierte cuando al proveedor seleccionado le falta la clave y
+  ofrece configurarla en el acto.
+
+> Nota sobre el almacén: en Linux el llavero debe estar desbloqueado (GNOME
+> Keyring o KWallet). Si no está disponible, la aplicación lo indica y sigue
+> funcionando con las variables de entorno.
 
 ## Estructura del proyecto
 

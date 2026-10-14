@@ -112,6 +112,8 @@ pub enum ChatEvent {
         session_id: String,
         /// Descripción del error.
         message: String,
+        /// Si el fallo es de disponibilidad del proveedor (HU-25).
+        availability: bool,
     },
 }
 
@@ -242,6 +244,7 @@ fn generate(
         Err(error) => {
             let _ = event_tx.send(ChatEvent::Failed {
                 session_id,
+                availability: error.is_availability(),
                 message: error.to_string(),
             });
             return;
@@ -267,6 +270,7 @@ fn generate(
             if text.trim().is_empty() {
                 let _ = event_tx.send(ChatEvent::Failed {
                     session_id,
+                    availability: false,
                     message: "La generación no produjo contenido.".to_string(),
                 });
                 return;
@@ -277,6 +281,7 @@ fn generate(
             if let Err(error) = storage.add_message(&message) {
                 let _ = event_tx.send(ChatEvent::Failed {
                     session_id,
+                    availability: false,
                     message: format!("no se pudo guardar la respuesta: {error}"),
                 });
                 return;
@@ -290,6 +295,7 @@ fn generate(
         Err(error) => {
             let _ = event_tx.send(ChatEvent::Failed {
                 session_id,
+                availability: error.is_availability(),
                 message: error.to_string(),
             });
         }

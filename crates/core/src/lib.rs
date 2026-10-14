@@ -10,6 +10,7 @@ pub mod error;
 pub mod index;
 pub mod paths;
 pub mod search;
+pub mod secrets;
 pub mod watch;
 
 pub use chat::{
@@ -23,6 +24,7 @@ pub use index::{
 };
 pub use paths::AppPaths;
 pub use search::{build_retriever, embedding_coverage, search_folder, EmbeddingCoverage};
+pub use secrets::{mask, resolve_key, KeyringStore, MemoryStore, SecretError, SecretStore};
 pub use watch::FolderWatcher;
 
 /// Nombre comercial del producto.

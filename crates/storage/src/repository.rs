@@ -297,12 +297,14 @@ impl Storage {
     /// Inserta o actualiza una sesión.
     pub fn upsert_session(&self, session: &Session) -> Result<()> {
         self.connection().execute(
-            "INSERT INTO sessions (id, folder_id, title, provider, model, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "INSERT INTO sessions
+                 (id, folder_id, title, provider, model, fallback_provider, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(id) DO UPDATE SET
                  title = excluded.title,
                  provider = excluded.provider,
                  model = excluded.model,
+                 fallback_provider = excluded.fallback_provider,
                  updated_at = excluded.updated_at",
             params![
                 session.id,
@@ -310,6 +312,7 @@ impl Storage {
                 session.title,
                 session.provider,
                 session.model,
+                session.fallback_provider,
                 session.created_at,
                 session.updated_at,
             ],
@@ -320,7 +323,7 @@ impl Storage {
     /// Lista las sesiones de una carpeta, las más recientes primero.
     pub fn list_sessions(&self, folder_id: &str) -> Result<Vec<Session>> {
         let mut stmt = self.connection().prepare(
-            "SELECT id, folder_id, title, provider, model, created_at, updated_at
+            "SELECT id, folder_id, title, provider, model, fallback_provider, created_at, updated_at
              FROM sessions WHERE folder_id = ?1 ORDER BY updated_at DESC",
         )?;
         let rows = stmt.query_map([folder_id], row_to_session)?;
@@ -332,7 +335,7 @@ impl Storage {
         let session = self
             .connection()
             .query_row(
-                "SELECT id, folder_id, title, provider, model, created_at, updated_at
+                "SELECT id, folder_id, title, provider, model, fallback_provider, created_at, updated_at
                  FROM sessions WHERE id = ?1",
                 [id],
                 row_to_session,
@@ -355,6 +358,15 @@ impl Storage {
         self.connection().execute(
             "UPDATE sessions SET provider = ?2, model = ?3, updated_at = ?4 WHERE id = ?1",
             params![id, provider, model, now_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    /// Define el proveedor de respaldo de una sesión (HU-25).
+    pub fn set_session_fallback(&self, id: &str, fallback: Option<&str>) -> Result<()> {
+        self.connection().execute(
+            "UPDATE sessions SET fallback_provider = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, fallback, now_rfc3339()],
         )?;
         Ok(())
     }
@@ -428,8 +440,9 @@ fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
         title: row.get(2)?,
         provider: row.get(3)?,
         model: row.get(4)?,
-        created_at: row.get(5)?,
-        updated_at: row.get(6)?,
+        fallback_provider: row.get(5)?,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
     })
 }
 
