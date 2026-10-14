@@ -20,6 +20,9 @@ const NOVEL_BLUE: Color32 = Color32::from_rgb(0x00, 0x00, 0xCC);
 const NOVEL_CYAN: Color32 = Color32::from_rgb(0x00, 0x87, 0xCC);
 const NOVEL_GRAY: Color32 = Color32::from_rgb(0x80, 0x80, 0x80);
 
+/// Color de la burbuja del usuario y de las filas seleccionadas (paleta Novel).
+const NOVEL_USER_BG: Color32 = Color32::from_rgb(0xC6, 0xD3, 0xDA);
+
 // --- Tokyo Night ---
 const TN_BG: Color32 = Color32::from_rgb(0x1A, 0x1B, 0x26);
 const TN_BG_DARK: Color32 = Color32::from_rgb(0x16, 0x16, 0x1E);
@@ -120,6 +123,24 @@ pub fn bubble_stroke(dark: bool) -> Color32 {
     }
 }
 
+/// Fondo de una fila seleccionada o activa.
+pub fn selection_fill(dark: bool) -> Color32 {
+    if dark {
+        Color32::from_rgb(0x2A, 0x33, 0x52)
+    } else {
+        NOVEL_USER_BG
+    }
+}
+
+/// Color de éxito (carpeta indexada correctamente).
+pub fn success_color(dark: bool) -> Color32 {
+    if dark {
+        TN_GREEN
+    } else {
+        NOVEL_GREEN
+    }
+}
+
 /// Paleta que corresponde a la configuración y al tema resuelto por el sistema.
 pub fn visuals(theme: Theme, resolved: EguiTheme) -> Visuals {
     match theme {
@@ -161,7 +182,7 @@ pub fn user_bubble(dark: bool) -> Color32 {
     if dark {
         Color32::from_rgb(0x33, 0x3C, 0x5E)
     } else {
-        Color32::from_rgb(0xC6, 0xD3, 0xDA)
+        NOVEL_USER_BG
     }
 }
 

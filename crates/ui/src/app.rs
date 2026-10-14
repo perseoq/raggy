@@ -1439,87 +1439,198 @@ impl RaggyApp {
         active_session: Option<&str>,
     ) -> SidebarActions {
         let mut actions = SidebarActions::default();
+
         egui::Panel::left("sidebar")
             .default_size(320.0)
             .show(ui, |ui| {
-                ui.add_space(8.0);
-                ui.strong("Carpetas indexadas");
-                ui.add_space(6.0);
-
                 egui::ScrollArea::vertical()
                     .id_salt("sidebar")
                     .show(ui, |ui| {
+                        ui.add_space(10.0);
+
+                        section_title(ui, "CARPETAS");
+                        ui.add_space(4.0);
+
                         if entries.is_empty() {
-                            ui.label("Aún no hay carpetas. Usa «Añadir carpeta».");
+                            ui.add_space(2.0);
+                            hint(ui, "Aún no hay carpetas. Usa «Añadir carpeta».");
+                            ui.add_space(6.0);
                         }
 
                         for entry in entries {
                             let is_selected = selected_folder == Some(entry.folder.id.as_str());
-                            if ui
-                                .selectable_label(is_selected, &entry.folder.name)
-                                .clicked()
-                            {
-                                actions.select_folder = Some(entry.folder.id.clone());
-                            }
+                            let dark = ui.visuals().dark_mode;
 
-                            let status = match (&entry.progress, &entry.error) {
-                                (Some((done, total)), _) => format!("Indexando… {done}/{total}"),
-                                (None, Some(error)) => format!("Error: {error}"),
-                                (None, None) => format!(
-                                    "{} archivos · {} fragmentos",
-                                    entry.folder.file_count, entry.chunks
-                                ),
-                            };
-                            ui.small(status);
-
-                            if let Some(message) = &entry.message {
-                                ui.small(message);
-                            }
-
-                            ui.horizontal(|ui| {
-                                if ui.small_button("Reindexar").clicked() {
-                                    actions.reindex = Some(entry.folder.id.clone());
-                                }
-                                if ui.small_button("Eliminar").clicked() {
-                                    actions.delete_folder = Some(entry.folder.id.clone());
-                                }
-                            });
-                            ui.add_space(8.0);
-                        }
-
-                        if selected_folder.is_some() {
-                            ui.separator();
-                            ui.add_space(6.0);
-                            ui.horizontal(|ui| {
-                                ui.strong("Sesiones");
-                                if ui.small_button("Nueva").clicked() {
-                                    actions.new_session = true;
-                                }
-                            });
-                            ui.add_space(4.0);
-
-                            if sessions.is_empty() {
-                                ui.small("Sin sesiones en esta carpeta.");
-                            }
-                            for session in sessions {
-                                let is_active = active_session == Some(session.id.as_str());
-                                if ui.selectable_label(is_active, &session.title).clicked() {
-                                    actions.select_session = Some(session.id.clone());
-                                }
-                                ui.small(format!("{} · {}", session.provider, session.model));
+                            card(ui, is_selected, |ui| {
                                 ui.horizontal(|ui| {
-                                    if ui.small_button("Renombrar").clicked() {
-                                        actions.rename_session = Some(session.id.clone());
+                                    let tint = tint_for(ui, is_selected);
+                                    crate::icons::icon(ui, crate::icons::folder(), tint, 15.0);
+                                    ui.add_space(2.0);
+
+                                    let title = ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(&entry.folder.name).strong(),
+                                        )
+                                        .sense(egui::Sense::click()),
+                                    );
+                                    if title.clicked() {
+                                        actions.select_folder = Some(entry.folder.id.clone());
                                     }
-                                    if ui.small_button("Eliminar").clicked() {
-                                        actions.delete_session = Some(session.id.clone());
-                                    }
+
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if crate::icons::icon_button(
+                                                ui,
+                                                crate::icons::trash(),
+                                                "Eliminar del índice",
+                                                tint,
+                                            )
+                                            .clicked()
+                                            {
+                                                actions.delete_folder =
+                                                    Some(entry.folder.id.clone());
+                                            }
+                                            if crate::icons::icon_button(
+                                                ui,
+                                                crate::icons::refresh(),
+                                                "Reindexar",
+                                                tint,
+                                            )
+                                            .clicked()
+                                            {
+                                                actions.reindex = Some(entry.folder.id.clone());
+                                            }
+                                        },
+                                    );
                                 });
-                                ui.add_space(6.0);
-                            }
+
+                                ui.horizontal(|ui| {
+                                    let (color, text) = match (&entry.progress, &entry.error) {
+                                        (Some((done, total)), _) => (
+                                            crate::theme::accent(dark),
+                                            format!("Indexando… {done}/{total}"),
+                                        ),
+                                        (None, Some(error)) => (
+                                            crate::theme::error_color(dark),
+                                            format!("Error: {error}"),
+                                        ),
+                                        (None, None) => (
+                                            crate::theme::success_color(dark),
+                                            format!(
+                                                "{} archivos · {} fragmentos",
+                                                entry.folder.file_count, entry.chunks
+                                            ),
+                                        ),
+                                    };
+                                    status_dot(ui, color);
+                                    ui.weak(egui::RichText::new(text).small());
+                                });
+
+                                if let Some(message) = &entry.message {
+                                    ui.horizontal(|ui| {
+                                        ui.add_space(10.0);
+                                        ui.weak(egui::RichText::new(message).small());
+                                    });
+                                }
+                            });
                         }
+
+                        ui.add_space(10.0);
+                        ui.separator();
+                        ui.add_space(10.0);
+
+                        ui.horizontal(|ui| {
+                            ui.add_space(12.0);
+                            ui.label(egui::RichText::new("SESIONES").small().strong());
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.add_space(10.0);
+                                    if crate::icons::icon_button(
+                                        ui,
+                                        crate::icons::plus(),
+                                        "Nueva sesión",
+                                        crate::theme::accent(ui.visuals().dark_mode),
+                                    )
+                                    .clicked()
+                                    {
+                                        actions.new_session = true;
+                                    }
+                                },
+                            );
+                        });
+                        ui.add_space(4.0);
+
+                        if sessions.is_empty() {
+                            ui.add_space(2.0);
+                            hint(ui, "Sin sesiones en esta carpeta.");
+                            ui.add_space(6.0);
+                        }
+
+                        for session in sessions {
+                            let is_active = active_session == Some(session.id.as_str());
+
+                            card(ui, is_active, |ui| {
+                                ui.horizontal(|ui| {
+                                    let tint = tint_for(ui, is_active);
+                                    crate::icons::icon(ui, crate::icons::chat(), tint, 15.0);
+                                    ui.add_space(2.0);
+
+                                    let title = ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(&session.title).strong(),
+                                        )
+                                        .sense(egui::Sense::click()),
+                                    );
+                                    if title.clicked() {
+                                        actions.select_session = Some(session.id.clone());
+                                    }
+
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if crate::icons::icon_button(
+                                                ui,
+                                                crate::icons::trash(),
+                                                "Eliminar sesión",
+                                                tint,
+                                            )
+                                            .clicked()
+                                            {
+                                                actions.delete_session = Some(session.id.clone());
+                                            }
+                                            if crate::icons::icon_button(
+                                                ui,
+                                                crate::icons::pencil(),
+                                                "Renombrar sesión",
+                                                tint,
+                                            )
+                                            .clicked()
+                                            {
+                                                actions.rename_session = Some(session.id.clone());
+                                            }
+                                        },
+                                    );
+                                });
+
+                                ui.horizontal(|ui| {
+                                    ui.add_space(10.0);
+                                    ui.weak(
+                                        egui::RichText::new(format!(
+                                            "{} · {}",
+                                            session.provider, session.model
+                                        ))
+                                        .small(),
+                                    );
+                                });
+                            });
+                        }
+
+                        ui.add_space(12.0);
                     });
             });
+
         actions
     }
 
@@ -3142,6 +3253,62 @@ fn message_bubble(ui: &mut egui::Ui, content: &str, is_user: bool) {
                 });
             });
     });
+}
+
+/// Dibuja una fila tarjeta del panel lateral (carpeta o sesión).
+fn card(ui: &mut egui::Ui, highlighted: bool, add_contents: impl FnOnce(&mut egui::Ui)) {
+    let dark = ui.visuals().dark_mode;
+    let fill = if highlighted {
+        crate::theme::selection_fill(dark)
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+
+    ui.add_space(2.0);
+    egui::Frame::NONE
+        .fill(fill)
+        .corner_radius(egui::CornerRadius::same(8))
+        .inner_margin(egui::Margin::symmetric(10, 7))
+        .show(ui, |ui| {
+            ui.set_width((ui.available_width() - 4.0).max(120.0));
+            ui.vertical(|ui| {
+                ui.set_width((ui.available_width()).max(120.0));
+                add_contents(ui);
+            });
+        });
+    ui.add_space(2.0);
+}
+
+/// Título de sección del panel lateral.
+fn section_title(ui: &mut egui::Ui, text: &str) {
+    ui.horizontal(|ui| {
+        ui.add_space(12.0);
+        ui.label(egui::RichText::new(text).small().strong());
+    });
+}
+
+/// Texto de ayuda con sangría.
+fn hint(ui: &mut egui::Ui, text: &str) {
+    ui.horizontal(|ui| {
+        ui.add_space(14.0);
+        ui.weak(egui::RichText::new(text).small());
+    });
+}
+
+/// Punto de color para indicar el estado.
+fn status_dot(ui: &mut egui::Ui, color: egui::Color32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(9.0, 9.0), egui::Sense::hover());
+    ui.painter().circle_filled(rect.center(), 4.0, color);
+    ui.add_space(2.0);
+}
+
+/// Color del contenido de una tarjeta según si está resaltada.
+fn tint_for(ui: &egui::Ui, highlighted: bool) -> egui::Color32 {
+    if highlighted {
+        crate::theme::accent(ui.visuals().dark_mode)
+    } else {
+        ui.visuals().weak_text_color()
+    }
 }
 
 /// Dibuja los bloques de código de un mensaje con nombre editable y acciones.

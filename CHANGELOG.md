@@ -9,6 +9,17 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [1.0.22] - 2026-10-14
+
+### Cambiado
+
+- **Panel lateral rediseñado**: carpetas y sesiones se muestran como tarjetas
+  redondeadas con **iconos vectoriales** (carpeta, chat, reindexar, renombrar y
+  eliminar en lugar de botones de texto). La fila activa se resalta con el color
+  de selección y el estado de cada carpeta lleva un **punto de color** (verde
+  cuando está indexada, azul mientras indexa, rojo si falla). Los títulos de
+  sección (CARPETAS / SESIONES) y el botón «+» de nueva sesión ordenan el panel.
+
 ## [1.0.21] - 2026-10-14
 
 ### Añadido
@@ -122,7 +133,8 @@ Primera versión estable: cubre las 32 historias de usuario de `hu.md`.
   (arm64) y Windows, se empaquetan con sus checksums SHA-256 y se publican en
   GitHub Releases.
 
-[No publicado]: https://github.com/perseoq/raggy/compare/v1.0.21...HEAD
+[No publicado]: https://github.com/perseoq/raggy/compare/v1.0.22...HEAD
+[1.0.22]: https://github.com/perseoq/raggy/releases/tag/v1.0.22
 [1.0.21]: https://github.com/perseoq/raggy/releases/tag/v1.0.21
 [1.0.20]: https://github.com/perseoq/raggy/releases/tag/v1.0.20
 [1.0.19]: https://github.com/perseoq/raggy/releases/tag/v1.0.19
