@@ -92,7 +92,7 @@ mod tests {
     #[test]
     fn detecta_archivos_nuevos_y_borrados() {
         let mut dir = std::env::temp_dir();
-        dir.push(format!("localmind-watch-{}", std::process::id()));
+        dir.push(format!("raggy-watch-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("crea directorio");
 

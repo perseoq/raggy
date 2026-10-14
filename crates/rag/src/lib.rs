@@ -1,4 +1,4 @@
-//! `localmind-rag` — motor de recuperación aumentada.
+//! `raggy-rag` — motor de recuperación aumentada.
 //!
 //! La Fase 1 implementa el **chunking semántico de Markdown** (HU-09): divide
 //! cada archivo `.md` respetando encabezados, listas y bloques de código, y

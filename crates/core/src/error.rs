@@ -34,7 +34,7 @@ pub enum CoreError {
 
     /// Error procedente de la capa de persistencia.
     #[error(transparent)]
-    Storage(#[from] localmind_storage::StorageError),
+    Storage(#[from] raggy_storage::StorageError),
 
     /// Error al recorrer el sistema de archivos.
     #[error("error al recorrer archivos: {0}")]

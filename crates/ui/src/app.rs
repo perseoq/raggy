@@ -1,4 +1,4 @@
-//! Aplicación `egui` de LocalMind.
+//! Aplicación `egui` de Raggy Desktop.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -6,11 +6,11 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 
-use localmind_core::index::{IndexEvent, IndexPhase, IndexWorker};
-use localmind_core::watch::FolderWatcher;
-use localmind_core::{AppConfig, AppPaths, APP_VERSION};
-use localmind_rag::{Chunk, ChunkingOptions};
-use localmind_storage::{Document, Folder, Storage};
+use raggy_core::index::{IndexEvent, IndexPhase, IndexWorker};
+use raggy_core::watch::FolderWatcher;
+use raggy_core::{AppConfig, AppPaths, APP_NAME, APP_VERSION};
+use raggy_rag::{Chunk, ChunkingOptions};
+use raggy_storage::{Document, Folder, Storage};
 
 /// Tiempo de espera antes de reindexar tras un cambio detectado en disco.
 const REINDEX_DEBOUNCE: Duration = Duration::from_millis(1200);
@@ -40,7 +40,7 @@ struct SidebarActions {
 }
 
 /// Estado raíz de la interfaz.
-pub struct LocalMindApp {
+pub struct RaggyApp {
     config: AppConfig,
     paths: AppPaths,
     storage: Option<Storage>,
@@ -57,7 +57,7 @@ pub struct LocalMindApp {
     fatal: Option<String>,
 }
 
-impl LocalMindApp {
+impl RaggyApp {
     /// Crea la aplicación, abre la base de datos y el indexador.
     pub fn new(ctx: &eframe::CreationContext<'_>, config: AppConfig, paths: AppPaths) -> Self {
         crate::theme::apply(ctx, config.theme);
@@ -392,7 +392,7 @@ impl LocalMindApp {
         egui::Panel::top("top_bar").show(ui, |ui| {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.heading("LocalMind");
+                ui.heading(APP_NAME);
                 ui.separator();
                 ui.label(format!("v{APP_VERSION} · Fase 1"));
                 ui.separator();
@@ -490,7 +490,7 @@ impl LocalMindApp {
             let Some(folder_id) = self.selected_folder.as_ref() else {
                 ui.vertical_centered(|ui| {
                     ui.add_space(96.0);
-                    ui.heading("LocalMind RAG Desktop");
+                    ui.heading(APP_NAME);
                     ui.add_space(8.0);
                     ui.label("Añade una carpeta con archivos Markdown para indexarla.");
                     ui.add_space(16.0);
@@ -659,7 +659,7 @@ impl LocalMindApp {
     }
 }
 
-impl eframe::App for LocalMindApp {
+impl eframe::App for RaggyApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 

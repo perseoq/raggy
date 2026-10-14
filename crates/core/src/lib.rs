@@ -1,4 +1,4 @@
-//! `localmind-core` — núcleo compartido de LocalMind RAG Desktop.
+//! `raggy-core` — núcleo compartido de Raggy Desktop.
 //!
 //! Contiene los tipos transversales a todos los crates: configuración de la
 //! aplicación, localización de directorios de datos y el modelo de errores.
@@ -20,10 +20,10 @@ pub use paths::AppPaths;
 pub use watch::FolderWatcher;
 
 /// Nombre comercial del producto.
-pub const APP_NAME: &str = "LocalMind";
+pub const APP_NAME: &str = "Raggy Desktop";
 
 /// Identificador corto usado en rutas y nombres de archivo.
-pub const APP_SLUG: &str = "localmind";
+pub const APP_SLUG: &str = "raggy";
 
 /// Versión del crate tomada de `Cargo.toml`.
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");

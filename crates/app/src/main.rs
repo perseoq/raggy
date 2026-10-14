@@ -1,12 +1,12 @@
-//! Punto de entrada de LocalMind RAG Desktop.
+//! Punto de entrada de Raggy Desktop.
 //!
 //! Fase 0: inicializa el registro de eventos, resuelve rutas, carga la
 //! configuración, abre la base de datos con sus migraciones y lanza la ventana.
 
 use anyhow::Context;
 
-use localmind_core::{AppConfig, AppPaths, APP_NAME, APP_VERSION};
-use localmind_storage::Storage;
+use raggy_core::{AppConfig, AppPaths, APP_NAME, APP_VERSION};
+use raggy_storage::Storage;
 
 fn main() -> anyhow::Result<()> {
     init_tracing();
@@ -30,13 +30,13 @@ fn main() -> anyhow::Result<()> {
         version = APP_VERSION,
         data_dir = %paths.data_dir.display(),
         schema_version,
-        providers = localmind_llm::ProviderId::ALL.len(),
-        top_k = localmind_rag::RetrieverOptions::default().top_k,
+        providers = raggy_llm::ProviderId::ALL.len(),
+        top_k = raggy_rag::RetrieverOptions::default().top_k,
         "cimientos cargados"
     );
 
     tracing::info!("arrancando interfaz");
-    localmind_ui::run(config, paths)
+    raggy_ui::run(config, paths)
         .map_err(|err| anyhow::anyhow!("fallo al ejecutar la interfaz: {err}"))?;
 
     // Mantener el manejador de almacenamiento vivo durante toda la sesión.

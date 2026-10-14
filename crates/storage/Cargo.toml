@@ -1,5 +1,5 @@
 [package]
-name = "localmind-storage"
+name = "raggy-storage"
 description = "Persistencia local en SQLite: carpetas, sesiones, mensajes, chunks y artefactos."
 version.workspace = true
 edition.workspace = true
@@ -10,7 +10,7 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
-localmind-rag.workspace = true
+raggy-rag.workspace = true
 
 serde.workspace = true
 thiserror.workspace = true

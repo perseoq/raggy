@@ -1,4 +1,4 @@
-# Stack Tecnológico: LocalMind RAG Desktop
+# Stack Tecnológico: Raggy Desktop
 
 A continuación, las tecnologías necesarias para construir este software, todas dentro del ecosistema Rust.
 

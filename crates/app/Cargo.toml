@@ -1,6 +1,6 @@
 [package]
-name = "localmind-app"
-description = "Binario principal que integra todas las capas de LocalMind."
+name = "raggy-app"
+description = "Binario principal que integra todas las capas de Raggy Desktop."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,11 +14,11 @@ name = "raggy"
 path = "src/main.rs"
 
 [dependencies]
-localmind-core.workspace = true
-localmind-llm.workspace = true
-localmind-rag.workspace = true
-localmind-storage.workspace = true
-localmind-ui.workspace = true
+raggy-core.workspace = true
+raggy-llm.workspace = true
+raggy-rag.workspace = true
+raggy-storage.workspace = true
+raggy-ui.workspace = true
 
 anyhow.workspace = true
 tokio.workspace = true

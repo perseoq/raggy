@@ -1,4 +1,4 @@
-# LocalMind RAG Desktop (raggy)
+# Raggy Desktop (raggy)
 
 Asistente de IA de escritorio, escrito en Rust, que responde **anclado únicamente
 a documentación Markdown local**. Indexas una carpeta, creas sesiones aisladas
@@ -34,7 +34,7 @@ DeepSeek, OpenRouter), generando y descargando código trazable.
 - Workspace de Cargo con los 6 crates previstos en `tech.md`.
 - Configuración persistente (`config.toml`) con validación y valores por defecto
   acordes a las HU (temperatura 0.1, `top-k` 5, umbral 0.3).
-- Resolución de directorios de datos multiplataforma (`LOCALMIND_DATA_DIR`).
+- Resolución de directorios de datos multiplataforma (`RAGGY_DATA_DIR`).
 - Persistencia SQLite con migraciones versionadas (`PRAGMA user_version`).
 - Interfaz `egui`/`eframe`, registro con `tracing` y CI en GitHub Actions.
 
@@ -85,21 +85,21 @@ raggy/
 
 ```bash
 cargo build --release      # compila todo el workspace
-cargo run -p localmind-app # abre la ventana (crea el directorio de datos)
+cargo run -p raggy-app # abre la ventana (crea el directorio de datos)
 cargo test --workspace     # ejecuta las pruebas
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
 
 Los datos se guardan en el directorio estándar del sistema
-(`~/.local/share/localmind` en Linux). Para aislarlos durante el desarrollo:
+(`~/.local/share/raggy` en Linux). Para aislarlos durante el desarrollo:
 
 ```bash
-LOCALMIND_DATA_DIR=./localmind-data cargo run -p localmind-app
+RAGGY_DATA_DIR=./raggy-data cargo run -p raggy-app
 ```
 
 El nivel de registro se controla con `RUST_LOG` (por ejemplo,
-`RUST_LOG=debug cargo run -p localmind-app`).
+`RUST_LOG=debug cargo run -p raggy-app`).
 
 ## Licencia
 

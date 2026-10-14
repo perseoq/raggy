@@ -1,4 +1,4 @@
-# Plan de Proyecto: **LocalMind RAG Desktop**
+# Plan de Proyecto: **Raggy Desktop**
 
 ## 1. Visión General
 

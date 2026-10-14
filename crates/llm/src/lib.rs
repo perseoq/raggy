@@ -1,4 +1,4 @@
-//! `localmind-llm` — capa de abstracción multi-proveedor.
+//! `raggy-llm` — capa de abstracción multi-proveedor.
 //!
 //! En la Fase 0 este crate define únicamente el contrato común ([`LlmProvider`])
 //! y los tipos normalizados de mensajes. Los adaptadores concretos (OpenAI,

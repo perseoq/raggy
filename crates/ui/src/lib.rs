@@ -1,4 +1,4 @@
-//! `localmind-ui` — capa de presentación.
+//! `raggy-ui` — capa de presentación.
 //!
 //! Fase 0: ventana con el esqueleto de la aplicación (barra superior, panel
 //! lateral y panel central). Los paneles de carpetas, sesiones y chat se
@@ -9,7 +9,7 @@ mod theme;
 
 use eframe::egui;
 
-use localmind_core::{AppConfig, AppPaths, APP_NAME};
+use raggy_core::{AppConfig, AppPaths, APP_NAME};
 
 /// Configuración de la ventana nativa.
 fn native_options() -> eframe::NativeOptions {
@@ -27,6 +27,6 @@ pub fn run(config: AppConfig, paths: AppPaths) -> eframe::Result<()> {
     eframe::run_native(
         APP_NAME,
         native_options(),
-        Box::new(move |ctx| Ok(Box::new(app::LocalMindApp::new(ctx, config, paths)))),
+        Box::new(move |ctx| Ok(Box::new(app::RaggyApp::new(ctx, config, paths)))),
     )
 }

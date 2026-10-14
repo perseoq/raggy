@@ -12,8 +12,8 @@ use std::thread::{self, JoinHandle};
 
 use walkdir::WalkDir;
 
-use localmind_rag::{ChunkSource, Chunker, MarkdownChunker};
-use localmind_storage::{Document, Folder, FolderStatus, Storage};
+use raggy_rag::{ChunkSource, Chunker, MarkdownChunker};
+use raggy_storage::{Document, Folder, FolderStatus, Storage};
 
 use crate::error::{CoreError, Result};
 
@@ -88,7 +88,7 @@ pub fn index_folder(
     storage: &mut Storage,
     folder_id: &str,
     root: &Path,
-    options: &localmind_rag::ChunkingOptions,
+    options: &raggy_rag::ChunkingOptions,
     report: &mut dyn FnMut(IndexProgress),
 ) -> Result<IndexSummary> {
     if !root.is_dir() {
@@ -225,12 +225,12 @@ pub enum IndexCommand {
         /// Raíz en disco.
         root: PathBuf,
         /// Parámetros de chunking vigentes.
-        options: localmind_rag::ChunkingOptions,
+        options: raggy_rag::ChunkingOptions,
     },
     /// Reindexa todas las carpetas registradas.
     ReindexAll {
         /// Parámetros de chunking vigentes.
-        options: localmind_rag::ChunkingOptions,
+        options: raggy_rag::ChunkingOptions,
     },
     /// Detiene el hilo.
     Shutdown,
@@ -266,7 +266,7 @@ impl IndexWorker {
         let (event_tx, event_rx) = mpsc::channel();
 
         let handle = thread::Builder::new()
-            .name("localmind-indexer".to_string())
+            .name("raggy-indexer".to_string())
             .spawn(move || worker_loop(&db_path, command_rx, event_tx))
             .map_err(|source| CoreError::Io {
                 path: PathBuf::from("<hilo indexador>"),
@@ -285,7 +285,7 @@ impl IndexWorker {
         &self,
         folder_id: impl Into<String>,
         root: PathBuf,
-        options: localmind_rag::ChunkingOptions,
+        options: raggy_rag::ChunkingOptions,
     ) {
         let _ = self.command_tx.send(IndexCommand::IndexFolder {
             folder_id: folder_id.into(),
@@ -295,7 +295,7 @@ impl IndexWorker {
     }
 
     /// Encola la reindexación de todas las carpetas.
-    pub fn reindex_all(&self, options: localmind_rag::ChunkingOptions) {
+    pub fn reindex_all(&self, options: raggy_rag::ChunkingOptions) {
         let _ = self.command_tx.send(IndexCommand::ReindexAll { options });
     }
 
@@ -360,7 +360,7 @@ fn run_index(
     event_tx: &Sender<IndexEvent>,
     folder_id: &str,
     root: &Path,
-    options: &localmind_rag::ChunkingOptions,
+    options: &raggy_rag::ChunkingOptions,
 ) {
     let mut report = |progress: IndexProgress| {
         let _ = event_tx.send(IndexEvent::Progress(progress));
@@ -384,7 +384,7 @@ fn run_index(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use localmind_rag::ChunkingOptions;
+    use raggy_rag::ChunkingOptions;
 
     struct TemporalDir {
         path: PathBuf,
@@ -393,7 +393,7 @@ mod tests {
     impl TemporalDir {
         fn new(tag: &str) -> Self {
             let mut path = std::env::temp_dir();
-            path.push(format!("localmind-index-{tag}-{}", std::process::id()));
+            path.push(format!("raggy-index-{tag}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&path);
             std::fs::create_dir_all(&path).expect("crea directorio temporal");
             Self { path }

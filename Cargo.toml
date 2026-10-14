@@ -20,11 +20,11 @@ homepage = "https://github.com/perseoq/raggy"
 
 [workspace.dependencies]
 # --- crates internos ---
-localmind-core = { path = "crates/core" }
-localmind-llm = { path = "crates/llm" }
-localmind-rag = { path = "crates/rag" }
-localmind-storage = { path = "crates/storage" }
-localmind-ui = { path = "crates/ui" }
+raggy-core = { path = "crates/core" }
+raggy-llm = { path = "crates/llm" }
+raggy-rag = { path = "crates/rag" }
+raggy-storage = { path = "crates/storage" }
+raggy-ui = { path = "crates/ui" }
 
 # --- runtime / errores ---
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "sync", "fs", "time"] }

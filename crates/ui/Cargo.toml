@@ -1,6 +1,6 @@
 [package]
-name = "localmind-ui"
-description = "Interfaz gráfica de escritorio de LocalMind (egui/eframe)."
+name = "raggy-ui"
+description = "Interfaz gráfica de escritorio de Raggy Desktop (egui/eframe)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,9 +10,9 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
-localmind-core.workspace = true
-localmind-rag.workspace = true
-localmind-storage.workspace = true
+raggy-core.workspace = true
+raggy-rag.workspace = true
+raggy-storage.workspace = true
 
 eframe.workspace = true
 egui.workspace = true

@@ -1,4 +1,4 @@
-# Historias de Usuario: LocalMind RAG Desktop
+# Historias de Usuario: Raggy Desktop
 
 A continuación, las historias de usuario organizadas por épica, con formato estándar (Como / Quiero / Para) y criterios de aceptación.
 

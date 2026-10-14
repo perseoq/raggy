@@ -1,5 +1,5 @@
 [package]
-name = "localmind-llm"
+name = "raggy-llm"
 description = "Abstracción multi-proveedor de LLM (OpenAI, Anthropic, DeepSeek, OpenRouter)."
 version.workspace = true
 edition.workspace = true

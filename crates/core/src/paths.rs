@@ -10,7 +10,7 @@ use crate::APP_SLUG;
 ///
 /// Útil para desarrollo, pruebas y para los casos "portables" descritos en
 /// HU-28 (directorio de datos configurable).
-pub const DATA_DIR_ENV: &str = "LOCALMIND_DATA_DIR";
+pub const DATA_DIR_ENV: &str = "RAGGY_DATA_DIR";
 
 /// Rutas canónicas usadas por la aplicación dentro del directorio de datos.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,7 +20,7 @@ pub struct AppPaths {
 }
 
 impl AppPaths {
-    /// Resuelve el directorio de datos respetando `LOCALMIND_DATA_DIR` y, en su
+    /// Resuelve el directorio de datos respetando `RAGGY_DATA_DIR` y, en su
     /// defecto, el directorio estándar del sistema operativo.
     pub fn resolve() -> Result<Self> {
         if let Some(dir) = std::env::var_os(DATA_DIR_ENV) {
@@ -92,25 +92,25 @@ mod tests {
 
     #[test]
     fn rutas_derivadas_cuelgan_del_directorio_de_datos() {
-        let paths = AppPaths::with_data_dir("/tmp/localmind-test");
+        let paths = AppPaths::with_data_dir("/tmp/raggy-test");
         assert_eq!(
             paths.config_path(),
-            PathBuf::from("/tmp/localmind-test/config.toml")
+            PathBuf::from("/tmp/raggy-test/config.toml")
         );
         assert_eq!(
             paths.db_path(),
-            PathBuf::from("/tmp/localmind-test/localmind.sqlite3")
+            PathBuf::from("/tmp/raggy-test/raggy.sqlite3")
         );
         assert_eq!(
             paths.indexes_dir(),
-            PathBuf::from("/tmp/localmind-test/indexes")
+            PathBuf::from("/tmp/raggy-test/indexes")
         );
     }
 
     #[test]
     fn ensure_dirs_crea_el_arbol() {
         let mut dir = std::env::temp_dir();
-        dir.push(format!("localmind-paths-{}", std::process::id()));
+        dir.push(format!("raggy-paths-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
 
         let paths = AppPaths::with_data_dir(&dir);

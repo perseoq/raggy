@@ -1,4 +1,4 @@
--- Esquema inicial de LocalMind RAG Desktop (Fase 0).
+-- Esquema inicial de Raggy Desktop (Fase 0).
 -- Entidades alineadas con las épicas 1, 2, 3 y 6.
 
 CREATE TABLE IF NOT EXISTS folders (

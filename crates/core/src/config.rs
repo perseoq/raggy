@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn guarda_y_carga_desde_disco() {
         let mut dir = std::env::temp_dir();
-        dir.push(format!("localmind-config-{}", std::process::id()));
+        dir.push(format!("raggy-config-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("config.toml");
 

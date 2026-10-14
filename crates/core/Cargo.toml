@@ -1,6 +1,6 @@
 [package]
-name = "localmind-core"
-description = "Tipos de dominio, configuración, rutas de datos e indexación de LocalMind."
+name = "raggy-core"
+description = "Tipos de dominio, configuración, rutas de datos e indexación de Raggy Desktop."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,8 +10,8 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
-localmind-rag.workspace = true
-localmind-storage.workspace = true
+raggy-rag.workspace = true
+raggy-storage.workspace = true
 
 serde.workspace = true
 toml.workspace = true

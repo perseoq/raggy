@@ -2,7 +2,7 @@
 
 use rusqlite::{params, OptionalExtension, Row};
 
-use localmind_rag::Chunk;
+use raggy_rag::Chunk;
 
 use crate::error::Result;
 use crate::models::{Document, Folder, FolderStatus};
@@ -220,7 +220,7 @@ impl Storage {
                 id: row.get(0)?,
                 content_hash: row.get(6)?,
                 content: row.get(7)?,
-                metadata: localmind_rag::ChunkMetadata {
+                metadata: raggy_rag::ChunkMetadata {
                     source_path: row.get(1)?,
                     source_file: row.get(2)?,
                     heading: row.get(3)?,

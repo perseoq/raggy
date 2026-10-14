@@ -4,9 +4,9 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use localmind_core::{IndexEvent, IndexWorker};
-use localmind_rag::ChunkingOptions;
-use localmind_storage::{Folder, FolderStatus, Storage};
+use raggy_core::{IndexEvent, IndexWorker};
+use raggy_rag::ChunkingOptions;
+use raggy_storage::{Folder, FolderStatus, Storage};
 
 struct Temporary {
     path: PathBuf,
@@ -15,7 +15,7 @@ struct Temporary {
 impl Temporary {
     fn new(tag: &str) -> Self {
         let mut path = std::env::temp_dir();
-        path.push(format!("localmind-it-{tag}-{}", std::process::id()));
+        path.push(format!("raggy-it-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).expect("crea directorio temporal");
         Self { path }
@@ -47,10 +47,7 @@ fn options() -> ChunkingOptions {
     }
 }
 
-fn wait_for_finish(
-    worker: &IndexWorker,
-    timeout: Duration,
-) -> Option<localmind_core::IndexSummary> {
+fn wait_for_finish(worker: &IndexWorker, timeout: Duration) -> Option<raggy_core::IndexSummary> {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         for event in worker.drain() {
@@ -73,7 +70,7 @@ fn el_worker_indexa_y_actualiza_de_forma_incremental() {
     docs.write("notas/ideas.md", "# Ideas\n\n- una\n- dos\n");
 
     let data = Temporary::new("data");
-    let db_path = data.join("localmind.sqlite3");
+    let db_path = data.join("raggy.sqlite3");
 
     let folder = {
         let storage = Storage::open(&db_path).expect("abre la base de datos");
@@ -128,7 +125,7 @@ fn el_worker_indexa_y_actualiza_de_forma_incremental() {
 }
 
 /// Comprueba que ningún fragmento contiene un cerco de código impar.
-fn chunk_keeps_code_block(chunks: &[localmind_rag::Chunk]) -> bool {
+fn chunk_keeps_code_block(chunks: &[raggy_rag::Chunk]) -> bool {
     chunks.iter().all(|chunk| {
         let fences = chunk
             .content

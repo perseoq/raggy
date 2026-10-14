@@ -1,4 +1,4 @@
-//! `localmind-storage` — capa de persistencia local.
+//! `raggy-storage` — capa de persistencia local.
 //!
 //! Envoltorio sobre SQLite (vía `rusqlite`) que gestiona el esquema y las
 //! entidades del dominio: carpetas indexadas, documentos, chunks, sesiones,

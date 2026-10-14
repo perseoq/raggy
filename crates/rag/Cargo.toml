@@ -1,5 +1,5 @@
 [package]
-name = "localmind-rag"
+name = "raggy-rag"
 description = "Chunking de Markdown, embeddings y recuperación de contexto."
 version.workspace = true
 edition.workspace = true

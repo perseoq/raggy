@@ -2,7 +2,7 @@
 
 use eframe::egui;
 
-use localmind_core::Theme;
+use raggy_core::Theme;
 
 /// Traduce el tema de la configuración a la preferencia de `egui`.
 pub fn apply(ctx: &eframe::CreationContext<'_>, theme: Theme) {
