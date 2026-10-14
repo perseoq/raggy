@@ -14,6 +14,7 @@ pub mod index;
 pub mod paths;
 pub mod search;
 pub mod secrets;
+pub mod uploads;
 pub mod watch;
 
 pub use artifacts::{
@@ -28,8 +29,8 @@ pub use config::{AppConfig, ModelConfig, RagConfig, Theme, DEFAULT_TEMPERATURE};
 pub use error::{CoreError, Result};
 pub use export::{session_markdown, write_session_export};
 pub use index::{
-    index_folder, scan_markdown_files, IndexCommand, IndexEvent, IndexOptions, IndexPhase,
-    IndexProgress, IndexSummary, IndexWorker,
+    index_folder, is_indexable, scan_indexable_files, IndexCommand, IndexEvent, IndexOptions,
+    IndexPhase, IndexProgress, IndexSummary, IndexWorker, INDEXABLE_EXTENSIONS,
 };
 pub use paths::{
     home_dir, migrate_data, resolve, resolve_from, AppPaths, HOME_DIR_NAME, HOME_ENV, SETTINGS_FILE,
@@ -38,6 +39,7 @@ pub use search::{build_retriever, embedding_coverage, search_folder, EmbeddingCo
 pub use secrets::{
     mask, resolve_key, MemoryStore, Secret, SecretError, SecretStore, SettingsStore,
 };
+pub use uploads::import_files;
 pub use watch::FolderWatcher;
 
 /// Nombre comercial del producto.

@@ -5,10 +5,11 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Asistente de IA de escritorio que responde **anclado únicamente a tu
-documentación Markdown local**. Indexas una carpeta, creas sesiones aisladas por
-carpeta y conversas con distintos modelos de lenguaje, obteniendo respuestas con
-**citas verificables** al archivo y a las líneas exactas… y sin que tus
-documentos salgan de tu equipo más allá del proveedor que elijas.
+documentación local**: archivos Markdown y **código** (`.py`, `.rs`, `.cpp`, `.h`,
+`.go`, `.ts`…). Indexas una carpeta o subes archivos sueltos, creas sesiones
+aisladas por contexto y conversas con distintos modelos de lenguaje, obteniendo
+respuestas que **citan el archivo y las líneas** de donde salen… y sin que tu
+documentación salga de tu equipo más allá del proveedor que elijas.
 
 Escrito en Rust con interfaz nativa (`egui`/`eframe`). Funciona en Linux, macOS y
 Windows.
@@ -17,8 +18,12 @@ Windows.
 
 ## Características
 
-### Indexación local de Markdown
-- Añade carpetas con el diálogo nativo; se recorren recursivamente todos los `.md`.
+### Indexación local de Markdown y código
+- Añade carpetas con el diálogo nativo; se recorren recursivamente los `.md`,
+  `.txt` y **archivos de código** (`py`, `rs`, `cpp`, `h`, `go`, `ts`…).
+- Botón **Subir archivos** para incorporar archivos sueltos de código: se copian
+  a una carpeta gestionada («Archivos subidos») que se indexa como una más, sin
+  tocar los originales.
 - **Chunking semántico**: respeta encabezados, listas y bloques de código (un
   bloque nunca se parte) y guarda archivo, ruta, encabezado padre y rango de líneas.
 - **Reindexación incremental** por hash y fecha de modificación: solo se
@@ -92,9 +97,9 @@ carpeta.
 1. **Configura tus claves.** Abre **Claves de API** y pega la clave del proveedor
    que vayas a usar, o define la variable de entorno correspondiente. El botón
    **Probar** comprueba la conexión y lista los modelos disponibles.
-2. **Añade una carpeta.** Pulsa **Añadir carpeta** y elige una carpeta con
-   documentación Markdown. Verás el progreso y, al terminar, cuántos archivos y
-   fragmentos se han indexado.
+2. **Añade documentación.** Pulsa **Añadir carpeta** para indexar una carpeta con
+   Markdown o código, o **Subir archivos** para incorporar archivos de código
+   sueltos (quedan en la carpeta gestionada **Archivos subidos**).
 3. **Explora.** Escribe una consulta en el buscador para ver los fragmentos
    relevantes con su puntuación y su cita. Los archivos de la carpeta se listan
    en la vista central.

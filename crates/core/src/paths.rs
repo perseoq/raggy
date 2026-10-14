@@ -69,6 +69,11 @@ impl AppPaths {
         self.data_dir.join("artifacts")
     }
 
+    /// Directorio de subidas de archivos de código.
+    pub fn uploads_dir(&self) -> PathBuf {
+        self.data_dir.join("uploads")
+    }
+
     /// Directorio de registros (logs).
     pub fn logs_dir(&self) -> PathBuf {
         self.data_dir.join("logs")
@@ -81,6 +86,7 @@ impl AppPaths {
             self.data_dir.clone(),
             self.indexes_dir(),
             self.artifacts_dir(),
+            self.uploads_dir(),
             self.logs_dir(),
         ] {
             std::fs::create_dir_all(&dir).map_err(|source| CoreError::Io { path: dir, source })?;
@@ -148,6 +154,7 @@ pub fn migrate_data(
     for (source, destination) in [
         (from.indexes_dir(), to.indexes_dir()),
         (from.artifacts_dir(), to.artifacts_dir()),
+        (from.uploads_dir(), to.uploads_dir()),
         (from.logs_dir(), to.logs_dir()),
     ] {
         copy_tree(&source, &destination, &mut copied)?;

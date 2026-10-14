@@ -82,24 +82,39 @@ pub struct IndexSummary {
     pub chunks_written: usize,
 }
 
-/// Recorre recursivamente `root` y devuelve los archivos `.md`.
-pub fn scan_markdown_files(root: &Path) -> Vec<PathBuf> {
+/// ¿La ruta es un archivo que se puede indexar? (Markdown o código)
+pub fn is_indexable(path: &Path) -> bool {
+    let Some(extension) = path.extension().and_then(|ext| ext.to_str()) else {
+        return false;
+    };
+
+    let extension = extension.to_ascii_lowercase();
+    if matches!(extension.as_str(), "md" | "markdown" | "mdx" | "txt") {
+        return true;
+    }
+    raggy_llm::is_code_extension(&extension)
+}
+
+/// Recorre recursivamente `root` y devuelve los archivos indexables.
+pub fn scan_indexable_files(root: &Path) -> Vec<PathBuf> {
     WalkDir::new(root)
         .follow_links(false)
         .into_iter()
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.file_type().is_file())
         .map(|entry| entry.into_path())
-        .filter(|path| is_markdown(path))
+        .filter(|path| is_indexable(path))
         .collect()
 }
 
-/// ¿La ruta tiene extensión Markdown?
-pub fn is_markdown(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
-}
+/// Extensiones indexables, para los filtros de los diálogos.
+pub const INDEXABLE_EXTENSIONS: &[&str] = &[
+    "md", "markdown", "mdx", "txt", "py", "pyi", "rs", "c", "h", "cc", "cpp", "cxx", "hpp", "hh",
+    "cs", "go", "java", "kt", "kts", "js", "mjs", "jsx", "ts", "tsx", "rb", "php", "swift", "m",
+    "mm", "scala", "lua", "pl", "r", "dart", "ex", "exs", "clj", "sh", "bash", "zsh", "ps1", "sql",
+    "json", "yaml", "yml", "toml", "xml", "html", "css", "scss", "vue", "svelte", "zig", "nim",
+    "jl", "groovy", "tf", "proto", "graphql", "ini", "cfg", "conf", "asm", "sol",
+];
 
 /// Indexa una carpeta de forma incremental.
 ///
@@ -120,7 +135,7 @@ pub fn index_folder(
 
     storage.set_folder_status(folder_id, FolderStatus::Indexing, 0)?;
 
-    let mut files = scan_markdown_files(root);
+    let mut files = scan_indexable_files(root);
     files.sort();
     let total = files.len();
 
@@ -448,12 +463,13 @@ mod tests {
     }
 
     #[test]
-    fn indexa_archivos_md_de_forma_recursiva() {
+    fn indexa_markdown_y_archivos_de_forma_recursiva() {
         let dir = TemporalDir::new("recursivo");
         dir.write("uno.md", "# Uno\n\ntexto uno\n");
         dir.write("sub/dos.md", "# Dos\n\ntexto dos\n");
-        dir.write("ignorado.txt", "no es markdown");
-        dir.write("sub/tres.markdown", "tampoco");
+        dir.write("notas.txt", "notas sueltas");
+        dir.write("sub/tres.markdown", "documento");
+        dir.write("imagen.png", "no es texto");
 
         let mut storage = Storage::open_in_memory().expect("abre");
         let folder = Folder::new(dir.path.to_string_lossy().to_string(), "docs");
@@ -469,10 +485,25 @@ mod tests {
         )
         .expect("indexa");
 
-        assert_eq!(summary.files_total, 2);
-        assert_eq!(summary.files_indexed, 2);
-        assert_eq!(storage.list_documents(&folder.id).expect("lista").len(), 2);
-        assert!(storage.count_chunks(&folder.id).expect("cuenta") >= 2);
+        // Markdown, texto y código sí; la imagen no.
+        assert_eq!(summary.files_total, 4);
+        assert_eq!(summary.files_indexed, 4);
+        assert_eq!(storage.list_documents(&folder.id).expect("lista").len(), 4);
+        assert!(storage.count_chunks(&folder.id).expect("cuenta") >= 4);
+    }
+
+    #[test]
+    fn reconoce_markdown_y_codigo_pero_no_otros_archivos() {
+        assert!(is_indexable(Path::new("notas.md")));
+        assert!(is_indexable(Path::new("README.markdown")));
+        assert!(is_indexable(Path::new("guion.py")));
+        assert!(is_indexable(Path::new("main.RS")));
+        assert!(is_indexable(Path::new("lib.cpp")));
+        assert!(is_indexable(Path::new("cabecera.h")));
+
+        assert!(!is_indexable(Path::new("foto.png")));
+        assert!(!is_indexable(Path::new("video.mp4")));
+        assert!(!is_indexable(Path::new("binario")));
     }
 
     #[test]

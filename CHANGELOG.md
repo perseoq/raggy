@@ -9,6 +9,22 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [1.0.21] - 2026-10-14
+
+### Añadido
+
+- **Subida de archivos de código**: el botón **Subir archivos** permite elegir
+  archivos sueltos (`.py`, `.rs`, `.cpp`, `.h`, `.go`, `.ts`…) que se copian a
+  una carpeta gestionada («Archivos subidos») y se indexan como una más, lista
+  para consultarla por RAG.
+
+### Cambiado
+
+- La indexación acepta **código y texto**, no solo Markdown: el escaneo de
+  carpetas incluye las extensiones de código reconocidas (`is_indexable`).
+- El chat **ya no muestra la fila de «Fuentes»**; el modelo sigue citando
+  `[archivo:línea-línea]` dentro de la propia respuesta.
+
 ## [1.0.20] - 2026-10-14
 
 ### Añadido
@@ -106,7 +122,8 @@ Primera versión estable: cubre las 32 historias de usuario de `hu.md`.
   (arm64) y Windows, se empaquetan con sus checksums SHA-256 y se publican en
   GitHub Releases.
 
-[No publicado]: https://github.com/perseoq/raggy/compare/v1.0.20...HEAD
+[No publicado]: https://github.com/perseoq/raggy/compare/v1.0.21...HEAD
+[1.0.21]: https://github.com/perseoq/raggy/releases/tag/v1.0.21
 [1.0.20]: https://github.com/perseoq/raggy/releases/tag/v1.0.20
 [1.0.19]: https://github.com/perseoq/raggy/releases/tag/v1.0.19
 [1.0.18]: https://github.com/perseoq/raggy/releases/tag/v1.0.18

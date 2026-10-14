@@ -108,6 +108,7 @@ enum SessionDialog {
 #[derive(Default)]
 struct TopActions {
     add: bool,
+    upload: bool,
     reindex_all: bool,
     settings: bool,
     keys: bool,
@@ -1112,12 +1113,88 @@ impl RaggyApp {
 
     fn add_folder(&mut self) {
         let Some(path) = rfd::FileDialog::new()
-            .set_title("Selecciona una carpeta con archivos Markdown")
+            .set_title("Selecciona una carpeta con Markdown o código")
             .pick_folder()
         else {
             return;
         };
         self.register_folder(path);
+    }
+
+    /// Sube archivos de código a la carpeta gestionada y la reindexa.
+    fn upload_files(&mut self) {
+        let Some(files) = rfd::FileDialog::new()
+            .set_title("Sube archivos de código para analizar")
+            .add_filter("Documentos y código", raggy_core::INDEXABLE_EXTENSIONS)
+            .pick_files()
+        else {
+            return;
+        };
+
+        let uploads = self.paths.uploads_dir();
+        let imported = match raggy_core::import_files(&uploads, &files) {
+            Ok(imported) => imported,
+            Err(error) => {
+                self.status = format!("No se pudieron subir los archivos: {error}");
+                return;
+            }
+        };
+
+        if imported.is_empty() {
+            self.status = "No se subió ningún archivo.".to_string();
+            return;
+        }
+
+        self.status = format!(
+            "{} archivo(s) añadidos a «Archivos subidos»; indexando…",
+            imported.len()
+        );
+        self.ensure_uploads_folder();
+    }
+
+    /// Busca o crea la carpeta de subidas y la indexa.
+    fn ensure_uploads_folder(&mut self) {
+        let uploads = self.paths.uploads_dir();
+        let path_str = uploads.to_string_lossy().to_string();
+
+        let existing = match &self.storage {
+            Some(storage) => storage.find_folder_by_path(&path_str).ok().flatten(),
+            None => None,
+        };
+
+        let folder = match existing {
+            Some(folder) => folder,
+            None => {
+                let folder = Folder::new(&path_str, "Archivos subidos");
+                let stored = self
+                    .storage
+                    .as_ref()
+                    .is_some_and(|storage| storage.upsert_folder(&folder).is_ok());
+                if !stored {
+                    self.status = "La base de datos no está disponible.".to_string();
+                    return;
+                }
+                folder
+            }
+        };
+
+        if !self
+            .entries
+            .iter()
+            .any(|entry| entry.folder.id == folder.id)
+        {
+            self.entries.push(FolderEntry {
+                folder: folder.clone(),
+                chunks: 0,
+                progress: Some((0, 0)),
+                message: None,
+                error: None,
+            });
+            self.sync_watcher();
+        }
+
+        self.select_folder(folder.id.clone());
+        self.start_index(&folder.id, uploads);
     }
 
     fn register_folder(&mut self, path: PathBuf) {
@@ -1329,6 +1406,9 @@ impl RaggyApp {
                 ui.separator();
                 if ui.button("Añadir carpeta").clicked() {
                     actions.add = true;
+                }
+                if ui.button("Subir archivos").clicked() {
+                    actions.upload = true;
                 }
                 if ui.button("Reindexar todo").clicked() {
                     actions.reindex_all = true;
@@ -1829,19 +1909,6 @@ impl RaggyApp {
                         );
                     }
 
-                    let refusal = message.content.contains(raggy_llm::NOT_FOUND_MESSAGE);
-                    if !is_user && !message.citations.is_empty() && !refusal {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.weak("Fuentes:");
-                            for citation in &message.citations {
-                                if ui.link(citation.label()).clicked() {
-                                    actions.push(CentralAction::OpenDocument(
-                                        citation.source_path.clone(),
-                                    ));
-                                }
-                            }
-                        });
-                    }
                     ui.add_space(10.0);
                 }
 
@@ -2798,6 +2865,9 @@ impl RaggyApp {
         let actions = Self::top_bar(ui, &self.paths.data_dir);
         if actions.add {
             self.add_folder();
+        }
+        if actions.upload {
+            self.upload_files();
         }
         if actions.reindex_all {
             self.reindex_all();

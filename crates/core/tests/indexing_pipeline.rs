@@ -150,6 +150,10 @@ fn la_busqueda_encuentra_el_fragmento_relevante() {
         "temas.md",
         "# Temas\n\nEl tema claro y oscuro se configura en las preferencias.\n",
     );
+    docs.write(
+        "servidor.py",
+        "def arrancar_servidor(puerto):\n    \"\"\"Levanta el servidor en el puerto indicado.\"\"\"\n    return puerto\n",
+    );
 
     let data = Temporary::new("search-data");
     let db_path = data.join("raggy.sqlite3");
@@ -195,4 +199,16 @@ fn la_busqueda_encuentra_el_fragmento_relevante() {
     )
     .expect("busca sin coincidencias");
     assert!(none.is_empty(), "el umbral alto no debería devolver nada");
+
+    // Los archivos de código también se indexan y se recuperan.
+    let code = raggy_core::search_folder(
+        &storage,
+        &folder.id,
+        "arrancar servidor puerto",
+        &options,
+        128,
+    )
+    .expect("busca en el código");
+    assert!(!code.is_empty(), "debería encontrar el archivo de código");
+    assert_eq!(code[0].chunk.metadata.source_path, "servidor.py");
 }

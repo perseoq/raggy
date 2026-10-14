@@ -17,6 +17,11 @@ pub struct CodeBlock {
     pub start_line: usize,
 }
 
+/// ¿La extensión corresponde a un archivo de código reconocido?
+pub fn is_code_extension(extension: &str) -> bool {
+    KNOWN_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
+}
+
 /// Extensiones que se reconocen como código al deducir nombres de archivo.
 const KNOWN_EXTENSIONS: &[&str] = &[
     "rs",
