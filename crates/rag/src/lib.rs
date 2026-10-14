@@ -24,5 +24,5 @@ pub use embedding::{
 };
 pub use markdown::MarkdownChunker;
 pub use retriever::{Citation, HybridRetriever, RetrievedChunk, Retriever, RetrieverOptions};
-pub use section::{chunk_sections, DocumentSection};
+pub use section::{chunk_sections, DocumentSection, SectionLocation};
 pub use vector::VectorIndex;

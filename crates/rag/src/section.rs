@@ -1,27 +1,99 @@
-//! Troceado de secciones extraídas de documentos (texto, CSV y, más adelante,
-//! Office y PDF).
+//! Troceado de secciones extraídas de documentos (texto, CSV, Office y PDF).
 //!
 //! A diferencia del chunker de Markdown, aquí no hay bloques de código ni
 //! encabezados que interpretar: cada sección ya viene delimitada por el
 //! extractor, con su encabezado y su ubicación. Solo hay que agrupar líneas
-//! hasta el tamaño objetivo, cortando preferentemente en líneas en blanco.
+//! hasta el tamaño objetivo, cortando preferentemente en líneas en blanco, y
+//! calcular la **ubicación de cada fragmento** a partir de la de la sección.
 
 use crate::chunk::{Chunk, ChunkMetadata, ChunkingOptions};
+
+/// Ubicación de una sección (y de cada uno de sus fragmentos) en el documento
+/// original.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SectionLocation {
+    /// Líneas del texto extraído; `start` es la primera línea de la sección
+    /// (1-based).
+    Lines {
+        /// Primera línea de la sección.
+        start: usize,
+    },
+    /// Filas de una hoja de cálculo o de un CSV.
+    Rows {
+        /// Nombre de la hoja; `None` para CSV (se cita como «hoja 1»).
+        sheet: Option<String>,
+        /// Rango de columnas en letras, p. ej. `A:D`.
+        columns: Option<String>,
+        /// Número de la primera fila de datos de la sección (1-based).
+        first_row: usize,
+        /// Líneas iniciales de la sección que no son filas (p. ej. cabecera).
+        prefix_lines: usize,
+    },
+    /// Página de un PDF.
+    Page(u32),
+    /// Diapositiva de una presentación.
+    Slide(u32),
+}
+
+impl SectionLocation {
+    /// Etiqueta legible del fragmento que cubre las líneas `[start, end)` de la
+    /// sección (índices 0-based dentro del texto de la sección).
+    pub fn label_for_range(&self, start: usize, end: usize) -> String {
+        let end = end.max(start + 1);
+        match self {
+            SectionLocation::Lines { start: base } => {
+                format!("líneas {}-{}", base + start, base + end - 1)
+            }
+            SectionLocation::Rows {
+                sheet,
+                columns,
+                first_row,
+                prefix_lines,
+            } => {
+                let sheet = sheet.clone().unwrap_or_else(|| "1".to_string());
+                let data_start = start.max(*prefix_lines);
+                if end <= data_start {
+                    return format!("hoja {sheet}");
+                }
+                let row_first = first_row + (data_start - prefix_lines);
+                let row_last = first_row + (end - 1 - prefix_lines);
+                format!("hoja {sheet}, {}", cell_range(columns, row_first, row_last))
+            }
+            SectionLocation::Page(number) => format!("página {number}"),
+            SectionLocation::Slide(number) => format!("diapositiva {number}"),
+        }
+    }
+}
+
+/// Formatea un rango de celdas, p. ej. `A2:D20`, o `filas 2-20` sin columnas.
+fn cell_range(columns: &Option<String>, first_row: usize, last_row: usize) -> String {
+    match columns
+        .as_deref()
+        .and_then(|columns| columns.split_once(':'))
+    {
+        Some((first, last)) => format!("{first}{first_row}:{last}{last_row}"),
+        None => format!("filas {first_row}-{last_row}"),
+    }
+}
 
 /// Sección de un documento extraído, lista para trocear.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentSection {
     /// Encabezado o contexto de la sección, si se conoce.
     pub heading: Option<String>,
-    /// Etiqueta de ubicación en el documento original (p. ej. `pág. 3`).
-    pub location: Option<String>,
+    /// Ubicación de la sección en el documento original.
+    pub location: Option<SectionLocation>,
     /// Texto de la sección.
     pub text: String,
 }
 
 impl DocumentSection {
     /// Crea una sección.
-    pub fn new(heading: Option<String>, location: Option<String>, text: impl Into<String>) -> Self {
+    pub fn new(
+        heading: Option<String>,
+        location: Option<SectionLocation>,
+        text: impl Into<String>,
+    ) -> Self {
         Self {
             heading,
             location,
@@ -60,6 +132,11 @@ pub fn chunk_sections(
             .to_hex()
             .to_string();
 
+            let location = section
+                .location
+                .as_ref()
+                .map(|location| location.label_for_range(start, end));
+
             chunks.push(Chunk {
                 id,
                 content_hash,
@@ -68,7 +145,7 @@ pub fn chunk_sections(
                     source_file: source_file.clone(),
                     source_path: relative_path.to_string(),
                     heading: section.heading.clone(),
-                    location: section.location.clone(),
+                    location,
                     start_line,
                     end_line,
                 },
@@ -168,18 +245,54 @@ mod tests {
     }
 
     #[test]
+    fn etiqueta_por_rango_de_filas() {
+        let location = SectionLocation::Rows {
+            sheet: Some("Ventas".to_string()),
+            columns: Some("A:D".to_string()),
+            first_row: 2,
+            prefix_lines: 1,
+        };
+        // La primera línea es la cabecera; las siguientes son filas 2, 3, ...
+        assert_eq!(location.label_for_range(1, 4), "hoja Ventas, A2:D4");
+        assert_eq!(location.label_for_range(0, 1), "hoja Ventas");
+    }
+
+    #[test]
+    fn etiqueta_por_rango_de_lineas() {
+        let location = SectionLocation::Lines { start: 10 };
+        assert_eq!(location.label_for_range(0, 3), "líneas 10-12");
+    }
+
+    #[test]
+    fn etiquetas_constantes() {
+        assert_eq!(SectionLocation::Page(3).label_for_range(0, 1), "página 3");
+        assert_eq!(
+            SectionLocation::Slide(2).label_for_range(0, 5),
+            "diapositiva 2"
+        );
+    }
+
+    #[test]
     fn conserva_encabezado_y_ubicacion() {
         let sections = vec![DocumentSection::new(
-            Some("nombre · edad".to_string()),
-            Some("filas 1-2".to_string()),
+            Some("Ventas".to_string()),
+            Some(SectionLocation::Rows {
+                sheet: Some("Ventas".to_string()),
+                columns: Some("A:B".to_string()),
+                first_row: 1,
+                prefix_lines: 0,
+            }),
             "nombre: Ana; edad: 30\nnombre: Luis; edad: 25",
         )];
         let chunks = chunk_sections("datos.csv", &sections, &options(800, 100));
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].metadata.source_path, "datos.csv");
         assert_eq!(chunks[0].metadata.source_file, "datos.csv");
-        assert_eq!(chunks[0].metadata.heading.as_deref(), Some("nombre · edad"));
-        assert_eq!(chunks[0].metadata.location.as_deref(), Some("filas 1-2"));
+        assert_eq!(chunks[0].metadata.heading.as_deref(), Some("Ventas"));
+        assert_eq!(
+            chunks[0].metadata.location.as_deref(),
+            Some("hoja Ventas, A1:B2")
+        );
         assert!(chunks[0].content.contains("nombre: Ana"));
     }
 
@@ -189,7 +302,11 @@ mod tests {
             .map(|index| format!("linea numero {index} con algo de texto"))
             .collect::<Vec<_>>()
             .join("\n");
-        let sections = vec![DocumentSection::new(None, None, long)];
+        let sections = vec![DocumentSection::new(
+            None,
+            Some(SectionLocation::Lines { start: 1 }),
+            long,
+        )];
         let chunks = chunk_sections("notas.txt", &sections, &options(120, 20));
         assert!(chunks.len() > 1);
         for chunk in &chunks {
@@ -198,6 +315,7 @@ mod tests {
                 "fragmento demasiado largo: {}",
                 chunk.content.chars().count()
             );
+            assert!(chunk.metadata.location.is_some());
         }
     }
 

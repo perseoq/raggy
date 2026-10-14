@@ -15,7 +15,7 @@ use walkdir::WalkDir;
 use raggy_docs::ExtractOptions;
 use raggy_rag::{
     chunk_sections, Chunk, ChunkSource, Chunker, ChunkingOptions, DocumentSection,
-    EmbeddingProvider, HashingEmbedding, MarkdownChunker,
+    EmbeddingProvider, HashingEmbedding, MarkdownChunker, SectionLocation,
 };
 use raggy_storage::{Document, Folder, FolderStatus, Storage};
 
@@ -320,7 +320,7 @@ fn extract_chunks(
         .map(|section| {
             DocumentSection::new(
                 section.heading.clone(),
-                Some(section.location.label()),
+                Some(section_location(&section.location)),
                 section.text.clone(),
             )
         })
@@ -330,6 +330,27 @@ fn extract_chunks(
         chunk_sections(relative, &sections, &options.chunking),
         warnings,
     ))
+}
+
+/// Traduce la ubicación de una sección de `raggy-docs` al modelo del chunker.
+fn section_location(location: &raggy_docs::Location) -> SectionLocation {
+    match location {
+        raggy_docs::Location::Lines { start, .. } => SectionLocation::Lines { start: *start },
+        raggy_docs::Location::Rows { start, .. } => SectionLocation::Rows {
+            sheet: None,
+            columns: None,
+            first_row: *start,
+            prefix_lines: 0,
+        },
+        raggy_docs::Location::Sheet { name, start, .. } => SectionLocation::Rows {
+            sheet: Some(name.clone()),
+            columns: None,
+            first_row: *start,
+            prefix_lines: 0,
+        },
+        raggy_docs::Location::Slide(number) => SectionLocation::Slide(*number),
+        raggy_docs::Location::Page(number) => SectionLocation::Page(*number),
+    }
 }
 
 fn relative_path(root: &Path, path: &Path) -> String {
@@ -635,8 +656,8 @@ mod tests {
         assert!(!chunks.is_empty());
         assert_eq!(
             chunks[0].metadata.location.as_deref(),
-            Some("filas 1-2"),
-            "el CSV debe citar por filas"
+            Some("hoja 1, filas 1-2"),
+            "el CSV debe citar hoja y filas"
         );
         assert!(chunks[0].content.contains("nombre: Ana"));
     }
