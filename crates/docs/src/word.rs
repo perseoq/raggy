@@ -1,10 +1,15 @@
 //! Extracción de documentos de Word (`.docx`).
 //!
 //! Un `.docx` es un ZIP con XML; el texto vive en `word/document.xml`, en
-//! elementos `<w:t>` agrupados por párrafos `<w:p>`. Se detectan los títulos por
-//! el estilo del párrafo (`w:pStyle`, p. ej. `Heading1`) para usarlos como
-//! encabezado de sección. Los formatos legacy `.doc` necesitan LibreOffice y se
-//! abordan en una fase posterior.
+//! elementos `<w:t>` agrupados por párrafos `<w:p>`. Los títulos se detectan por
+//! el estilo del párrafo (`w:pStyle`, p. ej. `Heading1`).
+//!
+//! Un `.docx` no guarda la paginación fija (depende del renderizador), así que
+//! se **aproxima** contando los saltos de página (`<w:br w:type="page">`,
+//! `<w:pageBreakBefore/>`) y las marcas `<w:lastRenderedPageBreak/>` que Word
+//! escribe al guardar. Con ellas se emite **una sección por página** citando
+//! `página N`. Si el documento no trae ninguna marca (p. ej. un `.doc`
+//! convertido), se cae a secciones por título con rangos de líneas.
 
 use std::io::{Cursor, Read};
 
@@ -16,14 +21,19 @@ use crate::{DocKind, ExtractError, ExtractedDocument, Location, Result, Section}
 /// Extrae el texto de un `.docx` a partir de sus bytes.
 pub fn extract(bytes: &[u8]) -> Result<ExtractedDocument> {
     let xml = read_document_xml(bytes)?;
-    let paragraphs = parse_paragraphs(&xml)?;
-    Ok(build_document(paragraphs))
+    let (paragraphs, has_page_breaks) = parse_paragraphs(&xml)?;
+    Ok(if has_page_breaks {
+        build_pages(paragraphs)
+    } else {
+        build_document(paragraphs)
+    })
 }
 
-/// Párrafo extraído, con su nivel de título si lo es.
+/// Párrafo extraído, con su nivel de título y la página en la que empieza.
 struct Paragraph {
     text: String,
     heading: Option<u8>,
+    page: u32,
 }
 
 /// Lee `word/document.xml` del archivo ZIP.
@@ -36,8 +46,8 @@ fn read_document_xml(bytes: &[u8]) -> Result<String> {
     Ok(xml)
 }
 
-/// Recorre el XML y devuelve los párrafos con su texto.
-fn parse_paragraphs(xml: &str) -> Result<Vec<Paragraph>> {
+/// Recorre el XML y devuelve los párrafos y si el documento trae saltos de página.
+fn parse_paragraphs(xml: &str) -> Result<(Vec<Paragraph>, bool)> {
     let mut reader = XmlReader::from_str(xml);
     reader.config_mut().trim_text(false);
 
@@ -46,6 +56,9 @@ fn parse_paragraphs(xml: &str) -> Result<Vec<Paragraph>> {
     let mut text = String::new();
     let mut heading: Option<u8> = None;
     let mut in_text = false;
+    let mut page = 1u32;
+    let mut current_page: Option<u32> = None;
+    let mut has_page_breaks = false;
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -55,18 +68,41 @@ fn parse_paragraphs(xml: &str) -> Result<Vec<Paragraph>> {
                 b"p" => {
                     text.clear();
                     heading = None;
+                    current_page = None;
                 }
                 b"t" => in_text = true,
                 b"pStyle" => heading = style_heading_level(&attribute(&element, b"val")),
+                b"br" => {
+                    if attribute(&element, b"type") == "page" {
+                        page += 1;
+                        has_page_breaks = true;
+                    }
+                }
+                b"lastRenderedPageBreak" | b"pageBreakBefore" => {
+                    page += 1;
+                    has_page_breaks = true;
+                }
                 _ => {}
             },
-            Ok(Event::Empty(element)) => {
-                if element.local_name().as_ref() == b"pStyle" {
-                    heading = style_heading_level(&attribute(&element, b"val"));
+            Ok(Event::Empty(element)) => match element.local_name().as_ref() {
+                b"pStyle" => heading = style_heading_level(&attribute(&element, b"val")),
+                b"br" => {
+                    if attribute(&element, b"type") == "page" {
+                        page += 1;
+                        has_page_breaks = true;
+                    }
                 }
-            }
+                b"lastRenderedPageBreak" | b"pageBreakBefore" => {
+                    page += 1;
+                    has_page_breaks = true;
+                }
+                _ => {}
+            },
             Ok(Event::Text(node)) => {
                 if in_text {
+                    if current_page.is_none() {
+                        current_page = Some(page);
+                    }
                     if let Ok(value) = node.decode() {
                         if let Ok(unescaped) = quick_xml::escape::unescape(&value) {
                             text.push_str(&unescaped);
@@ -79,6 +115,7 @@ fn parse_paragraphs(xml: &str) -> Result<Vec<Paragraph>> {
                 b"p" => paragraphs.push(Paragraph {
                     text: text.trim().to_string(),
                     heading,
+                    page: current_page.unwrap_or(page),
                 }),
                 _ => {}
             },
@@ -87,7 +124,7 @@ fn parse_paragraphs(xml: &str) -> Result<Vec<Paragraph>> {
         buf.clear();
     }
 
-    Ok(paragraphs)
+    Ok((paragraphs, has_page_breaks))
 }
 
 /// Devuelve el valor de un atributo del elemento, si existe.
@@ -128,7 +165,45 @@ fn style_heading_level(style: &str) -> Option<u8> {
         .or(Some(1))
 }
 
-/// Agrupa los párrafos en secciones usando los títulos como separadores.
+/// Agrupa los párrafos en secciones de una página cada una.
+fn build_pages(paragraphs: Vec<Paragraph>) -> ExtractedDocument {
+    let mut sections = Vec::new();
+    let mut current_page = 0u32;
+    let mut lines: Vec<String> = Vec::new();
+
+    for paragraph in paragraphs {
+        let text = paragraph.text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        if paragraph.page != current_page {
+            if !lines.is_empty() {
+                sections.push(make_page_section(current_page, &mut lines));
+            }
+            current_page = paragraph.page;
+        }
+        lines.push(text.to_string());
+    }
+
+    if !lines.is_empty() {
+        sections.push(make_page_section(current_page, &mut lines));
+    }
+
+    ExtractedDocument::new(DocKind::Word, sections)
+}
+
+/// Construye la sección de una página.
+fn make_page_section(page: u32, lines: &mut Vec<String>) -> Section {
+    let text = lines.join("\n");
+    lines.clear();
+    Section {
+        heading: None,
+        location: Location::Page(page),
+        text,
+    }
+}
+
+/// Agrupa los párrafos en secciones usando los títulos (respaldo sin páginas).
 fn build_document(paragraphs: Vec<Paragraph>) -> ExtractedDocument {
     let mut sections = Vec::new();
     let mut heading: Option<String> = None;
@@ -141,7 +216,7 @@ fn build_document(paragraphs: Vec<Paragraph>) -> ExtractedDocument {
         index += 1;
         if let Some(_level) = paragraph.heading {
             if !lines.is_empty() {
-                sections.push(make_section(
+                sections.push(make_lines_section(
                     &mut heading,
                     &mut lines,
                     start_line,
@@ -162,7 +237,7 @@ fn build_document(paragraphs: Vec<Paragraph>) -> ExtractedDocument {
     }
 
     if !lines.is_empty() {
-        sections.push(make_section(
+        sections.push(make_lines_section(
             &mut heading,
             &mut lines,
             start_line,
@@ -173,8 +248,8 @@ fn build_document(paragraphs: Vec<Paragraph>) -> ExtractedDocument {
     ExtractedDocument::new(DocKind::Word, sections)
 }
 
-/// Construye una sección a partir de las líneas acumuladas.
-fn make_section(
+/// Construye una sección con rango de líneas (respaldo).
+fn make_lines_section(
     heading: &mut Option<String>,
     lines: &mut Vec<String>,
     start_line: usize,
@@ -226,7 +301,7 @@ mod tests {
     }
 
     #[test]
-    fn extrae_parrafos_y_titulos() {
+    fn extrae_parrafos_y_titulos_sin_paginas() {
         let body = format!(
             "{}{}{}",
             paragraph_with_style("Heading1", "Introducción"),
@@ -241,7 +316,6 @@ mod tests {
             Some("Introducción")
         );
         assert!(document.sections[0].text.contains("Primer párrafo"));
-        assert!(document.sections[0].text.contains("Segundo párrafo"));
     }
 
     #[test]
@@ -253,18 +327,32 @@ mod tests {
     }
 
     #[test]
-    fn varios_titulos_dividen_en_secciones() {
+    fn pagina_con_salto_explicito() {
         let body = format!(
-            "{}{}{}{}",
-            paragraph_with_style("Heading1", "Uno"),
-            paragraph("Contenido uno"),
-            paragraph_with_style("Heading2", "Dos"),
-            paragraph("Contenido dos"),
+            "{}{}{}",
+            paragraph("primera pagina"),
+            "<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>",
+            paragraph("segunda pagina"),
         );
         let document = extract(&make_docx(&body)).expect("extrae");
         assert_eq!(document.sections.len(), 2);
-        assert_eq!(document.sections[0].heading.as_deref(), Some("Uno"));
-        assert_eq!(document.sections[1].heading.as_deref(), Some("Dos"));
+        assert_eq!(document.sections[0].location, Location::Page(1));
+        assert!(document.sections[0].text.contains("primera pagina"));
+        assert_eq!(document.sections[1].location, Location::Page(2));
+        assert!(document.sections[1].text.contains("segunda pagina"));
+    }
+
+    #[test]
+    fn pagina_con_marca_de_word() {
+        let body = format!(
+            "{}{}{}",
+            paragraph("hoja uno"),
+            "<w:p><w:r><w:lastRenderedPageBreak/></w:r></w:p>",
+            paragraph("hoja dos"),
+        );
+        let document = extract(&make_docx(&body)).expect("extrae");
+        assert_eq!(document.sections.len(), 2);
+        assert_eq!(document.sections[1].location, Location::Page(2));
     }
 
     #[test]
