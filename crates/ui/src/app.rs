@@ -12,9 +12,9 @@ use raggy_core::chat::{compose_request, context_from_retrieved};
 use raggy_core::index::{IndexEvent, IndexOptions, IndexPhase, IndexWorker};
 use raggy_core::watch::FolderWatcher;
 use raggy_core::{
-    artifacts_for_prompt, relative_to, save_artifact, search_folder, AppConfig, AppPaths,
-    ChatEvent, ChatWorker, ConflictPolicy, KeyringStore, ProviderFactory, RagConfig, SaveOutcome,
-    SecretStore, APP_NAME, APP_VERSION,
+    artifacts_for_prompt, relative_to, resolve_key, save_artifact, search_folder, AppConfig,
+    AppPaths, ChatEvent, ChatWorker, ConflictPolicy, KeyringStore, ProviderFactory, RagConfig,
+    SaveOutcome, SecretStore, Theme, APP_NAME, APP_VERSION,
 };
 use raggy_llm::{extract_code_blocks, suggest_filename, CodeBlock, ProviderId};
 use raggy_rag::{Chunk, ChunkingOptions, RetrievedChunk, RetrieverOptions};
@@ -157,6 +157,7 @@ enum CentralAction {
     DownloadAll {
         message_id: String,
     },
+    ExportSession,
 }
 
 /// Estado raíz de la interfaz.
@@ -202,6 +203,8 @@ pub struct RaggyApp {
     pending_download: Option<PendingDownload>,
     batch: Option<BatchDownload>,
     last_download_dir: Option<PathBuf>,
+    data_dir_draft: Option<PathBuf>,
+    pending_import: Option<PathBuf>,
     status: String,
     fatal: Option<String>,
 }
@@ -257,6 +260,8 @@ impl RaggyApp {
             pending_download: None,
             batch: None,
             last_download_dir: None,
+            data_dir_draft: None,
+            pending_import: None,
             status: String::new(),
             fatal: None,
         };
@@ -275,20 +280,14 @@ impl RaggyApp {
         }
 
         let factory_secrets = Arc::clone(&app.secrets);
-        let factory: ProviderFactory = Arc::new(move |id| {
-            let key = factory_secrets
-                .get(id)
-                .ok()
-                .flatten()
-                .or_else(|| raggy_llm::api_key(id));
-            match key {
-                Some(key) => raggy_llm::from_api_key(id, key),
+        let factory: ProviderFactory =
+            Arc::new(move |id| match resolve_key(factory_secrets.as_ref(), id) {
+                Some(secret) => raggy_llm::from_api_key(id, secret.expose().to_string()),
                 None => Err(raggy_llm::ProviderError::MissingApiKey {
                     provider: id.display_name(),
                     env_var: id.api_key_env(),
                 }),
-            }
-        });
+            });
         match ChatWorker::spawn(app.paths.db_path(), factory) {
             Ok(worker) => app.chat_worker = Some(worker),
             Err(error) => app.fatal = Some(format!("No se pudo iniciar el chat: {error}")),
@@ -374,14 +373,7 @@ impl RaggyApp {
     }
 
     fn test_key(&mut self, provider: ProviderId) {
-        let key = self
-            .secrets
-            .get(provider)
-            .ok()
-            .flatten()
-            .or_else(|| raggy_llm::api_key(provider));
-
-        let Some(key) = key else {
+        let Some(secret) = resolve_key(self.secrets.as_ref(), provider) else {
             self.key_status.insert(
                 provider,
                 KeyStatus::Error(format!(
@@ -393,6 +385,7 @@ impl RaggyApp {
             return;
         };
 
+        let key = secret.expose().to_string();
         self.key_status.insert(provider, KeyStatus::Testing);
         let sender = self.test_tx.clone();
         std::thread::spawn(move || {
@@ -1328,7 +1321,7 @@ impl RaggyApp {
             ui.horizontal(|ui| {
                 ui.heading(APP_NAME);
                 ui.separator();
-                ui.label(format!("v{APP_VERSION} · Fase 5"));
+                ui.label(format!("v{APP_VERSION} · Fase 6"));
                 ui.separator();
                 if ui.button("Añadir carpeta").clicked() {
                     actions.add = true;
@@ -1696,6 +1689,9 @@ impl RaggyApp {
             ui.separator();
             if ui.button("Artefactos").clicked() {
                 self.artifacts_open = true;
+            }
+            if ui.button("Exportar sesión").clicked() {
+                actions.push(CentralAction::ExportSession);
             }
         });
         ui.separator();
@@ -2297,13 +2293,48 @@ impl RaggyApp {
         let mut open = true;
         let mut save = false;
         let mut cancel = false;
+        let mut theme_change: Option<Theme> = None;
+        let mut pick_directory = false;
+        let mut discard_directory = false;
+        let mut apply_directory: Option<bool> = None;
+        let mut export = false;
+        let mut import = false;
 
-        egui::Window::new("Configuración del RAG")
+        let theme = self.config.theme;
+        let current_dir = self.paths.data_dir.clone();
+        let draft_dir = self.data_dir_draft.clone();
+        let warnings = self.settings_draft.warnings();
+
+        egui::Window::new("Configuración")
             .open(&mut open)
             .collapsible(false)
-            .resizable(false)
+            .resizable(true)
+            .default_width(640.0)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
+                ui.strong("Apariencia");
+                ui.horizontal(|ui| {
+                    ui.label("Tema:");
+                    let mut selected = theme;
+                    egui::ComboBox::from_id_salt("theme_selector")
+                        .selected_text(theme_label(theme))
+                        .show_ui(ui, |ui| {
+                            for candidate in [Theme::System, Theme::Light, Theme::Dark] {
+                                ui.selectable_value(
+                                    &mut selected,
+                                    candidate,
+                                    theme_label(candidate),
+                                );
+                            }
+                        });
+                    if selected != theme {
+                        theme_change = Some(selected);
+                    }
+                });
+
+                ui.add_space(8.0);
+                ui.separator();
+                ui.strong("Parámetros del RAG");
                 let draft = &mut self.settings_draft;
                 egui::Grid::new("settings_grid")
                     .num_columns(2)
@@ -2337,16 +2368,105 @@ impl RaggyApp {
 
                 ui.add_space(6.0);
                 ui.small("Cambiar el tamaño de fragmento o la dimensionalidad requiere reindexar.");
+                for warning in &warnings {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(200, 140, 0),
+                        format!("Aviso: {warning}"),
+                    );
+                }
+
                 ui.add_space(8.0);
+                ui.separator();
+                ui.strong("Directorio de datos");
+                ui.small(format!("Actual: {}", current_dir.display()));
+                ui.horizontal(|ui| {
+                    if ui.button("Cambiar carpeta…").clicked() {
+                        pick_directory = true;
+                    }
+                    match &draft_dir {
+                        Some(directory) => {
+                            ui.monospace(directory.display().to_string());
+                        }
+                        None => {
+                            ui.small("Sin cambios pendientes");
+                        }
+                    }
+                });
+                if draft_dir.is_some() {
+                    ui.horizontal(|ui| {
+                        if ui.button("Migrar datos y aplicar").clicked() {
+                            apply_directory = Some(true);
+                        }
+                        if ui.button("Aplicar sin migrar").clicked() {
+                            apply_directory = Some(false);
+                        }
+                        if ui.button("Descartar").clicked() {
+                            discard_directory = true;
+                        }
+                    });
+                    ui.small(
+                        "El cambio se aplicará al reiniciar la aplicación. Migrar copia la base de \
+                         datos, la configuración, los índices y los artefactos.",
+                    );
+                }
+
+                ui.add_space(8.0);
+                ui.separator();
+                ui.strong("Respaldo");
+                ui.horizontal(|ui| {
+                    if ui.button("Exportar todo").clicked() {
+                        export = true;
+                    }
+                    if ui.button("Importar respaldo…").clicked() {
+                        import = true;
+                    }
+                });
+                ui.small(
+                    "El paquete incluye la base de datos y la configuración, y se verifica su \
+                     integridad antes de restaurar.",
+                );
+
+                ui.add_space(10.0);
                 ui.horizontal(|ui| {
                     if ui.button("Guardar").clicked() {
                         save = true;
                     }
-                    if ui.button("Cancelar").clicked() {
+                    if ui.button("Cerrar").clicked() {
                         cancel = true;
                     }
                 });
             });
+
+        if let Some(theme) = theme_change {
+            self.config.theme = theme;
+            ctx.set_theme(crate::theme::preference(theme));
+            if let Err(error) = self.config.save(&self.paths.config_path()) {
+                tracing::warn!("no se pudo guardar el tema: {error}");
+            }
+        }
+        if cancel || !open {
+            self.settings_draft = self.config.rag.clone();
+            self.settings_open = false;
+        }
+        if pick_directory {
+            let mut dialog = rfd::FileDialog::new().set_title("Elige el directorio de datos");
+            dialog = dialog.set_directory(&current_dir);
+            if let Some(directory) = dialog.pick_folder() {
+                self.data_dir_draft = Some(directory);
+            }
+        }
+        if discard_directory {
+            self.data_dir_draft = None;
+        }
+        if let Some(migrate) = apply_directory {
+            self.apply_data_dir(migrate);
+        }
+        if export {
+            self.export_backup_now();
+        }
+        if import {
+            self.import_backup_pick();
+        }
 
         if save {
             let mut candidate = self.config.clone();
@@ -2370,9 +2490,222 @@ impl RaggyApp {
                     self.status = format!("Configuración inválida: {error}");
                 }
             }
-        } else if cancel || !open {
-            self.settings_draft = self.config.rag.clone();
-            self.settings_open = false;
+        }
+    }
+
+    /// Aplica el nuevo directorio de datos, migrando o no (HU-28).
+    fn apply_data_dir(&mut self, migrate: bool) {
+        let Some(directory) = self.data_dir_draft.clone() else {
+            return;
+        };
+        let target = AppPaths::with_data_dir(&directory);
+        if target.data_dir == self.paths.data_dir {
+            self.data_dir_draft = None;
+            return;
+        }
+
+        if migrate {
+            let outcome = self
+                .storage
+                .as_ref()
+                .map(|storage| raggy_core::migrate_data(&self.paths, &target, storage));
+
+            match outcome {
+                Some(Ok(count)) => {
+                    self.status = format!(
+                        "Migrados {count} archivos a {}. Reinicia la aplicación para usar la nueva ubicación.",
+                        directory.display()
+                    );
+                }
+                Some(Err(error)) => {
+                    self.status = format!("No se pudo migrar: {error}");
+                    return;
+                }
+                None => {
+                    self.status = "La base de datos no está disponible.".to_string();
+                    return;
+                }
+            }
+        } else {
+            self.status = format!(
+                "Se usará {} al reiniciar; los datos actuales no se migran.",
+                directory.display()
+            );
+        }
+
+        if let Err(error) = raggy_core::set_location(&directory) {
+            self.status = format!("No se pudo guardar la ubicación: {error}");
+            return;
+        }
+        self.data_dir_draft = None;
+    }
+
+    /// Exporta el respaldo completo (HU-32).
+    fn export_backup_now(&mut self) {
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Exportar respaldo")
+            .set_file_name("raggy-respaldo.zip");
+        if let Some(directory) = &self.last_download_dir {
+            dialog = dialog.set_directory(directory);
+        }
+        let Some(path) = dialog.save_file() else {
+            return;
+        };
+
+        let outcome = self
+            .storage
+            .as_ref()
+            .map(|storage| raggy_core::export_backup(storage, &self.paths, &path));
+
+        match outcome {
+            Some(Ok(summary)) => {
+                self.status = format!(
+                    "Respaldo exportado a {} ({} archivos, {} KiB).",
+                    path.display(),
+                    summary.files,
+                    summary.bytes / 1024
+                );
+            }
+            Some(Err(error)) => self.status = format!("No se pudo exportar el respaldo: {error}"),
+            None => self.status = "La base de datos no está disponible.".to_string(),
+        }
+    }
+
+    /// Pide un archivo de respaldo para importarlo (HU-32).
+    fn import_backup_pick(&mut self) {
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Selecciona un respaldo")
+            .add_filter("Respaldo de Raggy", &["zip"]);
+        if let Some(directory) = &self.last_download_dir {
+            dialog = dialog.set_directory(directory);
+        }
+        if let Some(path) = dialog.pick_file() {
+            self.pending_import = Some(path);
+        }
+    }
+
+    fn import_backup_now(&mut self) {
+        let Some(archive) = self.pending_import.take() else {
+            return;
+        };
+        match raggy_core::import_backup(&archive, &self.paths) {
+            Ok(summary) => {
+                self.status = format!(
+                    "Respaldo restaurado ({} archivos). Reinicia la aplicación para recargar los datos.",
+                    summary.files
+                );
+                self.reload_folders();
+            }
+            Err(error) => self.status = format!("No se pudo importar el respaldo: {error}"),
+        }
+    }
+
+    fn import_confirm(&mut self, ctx: &egui::Context) {
+        let Some(archive) = self.pending_import.clone() else {
+            return;
+        };
+
+        let mut confirm = false;
+        let mut cancel = false;
+
+        egui::Window::new("Restaurar respaldo")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label(format!("¿Restaurar «{}»?", archive.display()));
+                ui.small(
+                    "Se sobrescribirán la base de datos y la configuración actuales. \
+                     Reinicia la aplicación después de restaurar.",
+                );
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Cancelar").clicked() {
+                        cancel = true;
+                    }
+                    if ui.button("Restaurar").clicked() {
+                        confirm = true;
+                    }
+                });
+            });
+
+        if confirm {
+            self.import_backup_now();
+        } else if cancel {
+            self.pending_import = None;
+        }
+    }
+
+    /// Aviso de primera ejecución sobre qué se envía y a dónde (HU-30).
+    fn notice_window(&mut self, ctx: &egui::Context) {
+        if self.config.data_notice_acknowledged {
+            return;
+        }
+
+        let mut accept = false;
+
+        egui::Window::new("Privacidad de tus datos")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label(
+                    "Raggy funciona en tu equipo: la indexación y las búsquedas se hacen en local \
+                     con embeddings propios.",
+                );
+                ui.add_space(4.0);
+                ui.label(
+                    "Al usar el chat, solo se envían al proveedor que elijas los fragmentos \
+                     recuperados necesarios y tu pregunta. No hay telemetría ni otros envíos.",
+                );
+                ui.add_space(4.0);
+                ui.label("Tus claves de API se guardan cifradas en el llavero del sistema.");
+                ui.add_space(8.0);
+                if ui.button("Entendido").clicked() {
+                    accept = true;
+                }
+            });
+
+        if accept {
+            self.config.data_notice_acknowledged = true;
+            if let Err(error) = self.config.save(&self.paths.config_path()) {
+                tracing::warn!("no se pudo guardar el aviso de privacidad: {error}");
+            }
+        }
+    }
+
+    /// Exporta la sesión activa a Markdown (HU-31).
+    fn export_session(&mut self) {
+        let Some(session) = self.active_session.clone() else {
+            return;
+        };
+        let folder_name = self
+            .selected_folder
+            .as_ref()
+            .and_then(|id| self.entries.iter().find(|entry| &entry.folder.id == id))
+            .map(|entry| entry.folder.name.clone())
+            .unwrap_or_else(|| "carpeta".to_string());
+
+        let mut dialog = rfd::FileDialog::new().set_title("Exportar sesión a Markdown");
+        if let Some(directory) = &self.last_download_dir {
+            dialog = dialog.set_directory(directory);
+        }
+        let Some(directory) = dialog.pick_folder() else {
+            return;
+        };
+        self.last_download_dir = Some(directory.clone());
+
+        let messages = self.messages.clone();
+        let artifacts = self.artifacts.clone();
+        match raggy_core::write_session_export(
+            &directory,
+            &session,
+            &folder_name,
+            &messages,
+            &artifacts,
+        ) {
+            Ok(path) => self.status = format!("Sesión exportada a {}.", path.display()),
+            Err(error) => self.status = format!("No se pudo exportar la sesión: {error}"),
         }
     }
 
@@ -2472,6 +2805,7 @@ impl RaggyApp {
                     block_index,
                 } => self.download_block(message_id, block_index),
                 CentralAction::DownloadAll { message_id } => self.start_download_all(message_id),
+                CentralAction::ExportSession => self.export_session(),
             }
         }
     }
@@ -2535,6 +2869,8 @@ impl eframe::App for RaggyApp {
         self.artifacts_window(&ctx);
         self.batch_dialog(&ctx);
         self.conflict_dialog(&ctx);
+        self.import_confirm(&ctx);
+        self.notice_window(&ctx);
     }
 
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {
@@ -2564,6 +2900,15 @@ fn snippet(content: &str) -> String {
         snippet.push('…');
     }
     snippet
+}
+
+/// Etiqueta legible de un tema (HU-26).
+fn theme_label(theme: Theme) -> &'static str {
+    match theme {
+        Theme::Light => "Claro",
+        Theme::Dark => "Oscuro",
+        Theme::System => "Sistema",
+    }
 }
 
 /// Texto descriptivo del estado de una clave de API (HU-23, HU-24).

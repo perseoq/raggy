@@ -5,9 +5,11 @@
 //! No depende de la interfaz gráfica ni de ningún proveedor de LLM.
 
 pub mod artifacts;
+pub mod backup;
 pub mod chat;
 pub mod config;
 pub mod error;
+pub mod export;
 pub mod index;
 pub mod paths;
 pub mod search;
@@ -18,18 +20,23 @@ pub use artifacts::{
     artifacts_for_prompt, free_path, relative_to, sanitize_relative, save_artifact, ConflictPolicy,
     SaveOutcome,
 };
+pub use backup::{export_backup, import_backup, BackupSummary};
 pub use chat::{
     compose_request, context_from_retrieved, ChatCommand, ChatEvent, ChatWorker, ProviderFactory,
 };
 pub use config::{AppConfig, ModelConfig, RagConfig, Theme, DEFAULT_TEMPERATURE};
 pub use error::{CoreError, Result};
+pub use export::{session_markdown, write_session_export};
 pub use index::{
     index_folder, scan_markdown_files, IndexCommand, IndexEvent, IndexOptions, IndexPhase,
     IndexProgress, IndexSummary, IndexWorker,
 };
-pub use paths::AppPaths;
+pub use paths::{
+    default_data_dir, location_file, migrate_data, resolve, resolve_from, set_location, AppPaths,
+    LocationConfig,
+};
 pub use search::{build_retriever, embedding_coverage, search_folder, EmbeddingCoverage};
-pub use secrets::{mask, resolve_key, KeyringStore, MemoryStore, SecretError, SecretStore};
+pub use secrets::{mask, resolve_key, KeyringStore, MemoryStore, Secret, SecretError, SecretStore};
 pub use watch::FolderWatcher;
 
 /// Nombre comercial del producto.

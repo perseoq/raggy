@@ -65,6 +65,21 @@ impl Storage {
             .conn
             .pragma_query_value(None, "user_version", |row| row.get(0))?)
     }
+
+    /// Escribe una copia consistente de la base de datos en `path` (HU-32).
+    pub fn backup_to(&self, path: &Path) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| StorageError::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+
+        let mut destination = Connection::open(path)?;
+        let backup = rusqlite::backup::Backup::new(&self.conn, &mut destination)?;
+        backup.run_to_completion(16, std::time::Duration::from_millis(10), None)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

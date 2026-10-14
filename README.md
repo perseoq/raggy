@@ -5,10 +5,10 @@ a documentación Markdown local**. Indexas una carpeta, creas sesiones aisladas
 por carpeta y chateas con distintos proveedores de LLM (OpenAI, Anthropic,
 DeepSeek, OpenRouter), generando y descargando código trazable.
 
-> Estado: **Fase 5 completada** — además del chat, las respuestas con código se
-> pueden previsualizar, copiar y descargar con su nombre declarado, y los
-> artefactos quedan registrados como memoria del proyecto. Quedan la
-> configuración avanzada, la seguridad y la exportación (Fase 6).
+> Estado: **Fase 6 completada** — las 32 historias de usuario de `hu.md` están
+> implementadas. El proyecto cubre indexación, RAG híbrido, chat con sesiones,
+> multi-proveedor con claves cifradas, generación y descarga de código con
+> memoria de proyecto, configuración, seguridad y respaldo.
 
 ## Documentación
 
@@ -28,7 +28,7 @@ DeepSeek, OpenRouter), generando y descargando código trazable.
 | 3 | Chat y sesiones por carpeta | ✅ |
 | 4 | Multi-proveedor: claves, prueba de conexión y fallback | ✅ |
 | 5 | Generación y descarga de código, memoria de proyecto | ✅ |
-| 6 | Configuración avanzada, seguridad, exportación y pulido | pendiente |
+| 6 | Configuración, seguridad, exportación y respaldo | ✅ |
 
 ### Fase 0 — cimientos
 
@@ -144,6 +144,25 @@ DeepSeek, OpenRouter), generando y descargando código trazable.
 - **Continuidad entre turnos** (HU-21): el prompt incluye el manifiesto de los
   artefactos de la sesión y, cuando el usuario menciona uno, también su
   contenido, para que el modelo lo modifique sin duplicarlo.
+
+### Fase 6 — configuración, seguridad, exportación y respaldo (HU-26 a HU-32)
+
+- **Tema claro/oscuro/sistema** (HU-26) desde el panel de configuración, con
+  cambio inmediato y persistencia.
+- **Parámetros del RAG** (HU-27) con avisos para valores extremos.
+- **Directorio de datos configurable** (HU-28): se elige una carpeta y se puede
+  **migrar** la base de datos, la configuración, los índices y los artefactos, o
+  empezar de cero; el cambio se aplica al reiniciar.
+- **Seguridad** (HU-29): las claves viven tras un tipo `Secret` cuyo `Debug` y
+  `Display` redactan el valor, de modo que nunca aparecen en los registros.
+- **Privacidad** (HU-30): aviso en la primera ejecución explicando que el índice
+  es local y que al chatear solo se envían al proveedor elegido los fragmentos y
+  la pregunta; sin telemetría.
+- **Exportar sesión completa** (HU-31) a Markdown con metadatos, historial,
+  citas y artefactos.
+- **Respaldo e importación** (HU-32): paquete `.zip` con la base de datos
+  (instantánea consistente) y la configuración, más un manifiesto con el hash de
+  cada archivo que se **valida antes de restaurar**.
 
 ## Estructura del proyecto
 

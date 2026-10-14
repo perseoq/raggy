@@ -18,6 +18,42 @@ pub enum SecretError {
     Store(String),
 }
 
+/// Clave de API que no se filtra en los registros (HU-29).
+///
+/// El `Debug` y el `Display` redactan el valor, de modo que un `tracing::warn!`
+/// accidental nunca expone la credencial.
+#[derive(Clone)]
+pub struct Secret(String);
+
+impl Secret {
+    /// Envuelve una clave.
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// Devuelve el valor real; usar solo al construir la petición al proveedor.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+
+    /// ¿La clave está vacía?
+    pub fn is_empty(&self) -> bool {
+        self.0.trim().is_empty()
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Secret(***)")
+    }
+}
+
+impl std::fmt::Display for Secret {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("***")
+    }
+}
+
 /// Alias de resultado para el almacén de secretos.
 pub type Result<T> = std::result::Result<T, SecretError>;
 
@@ -124,12 +160,14 @@ fn locked() -> SecretError {
 }
 
 /// Resuelve la clave del proveedor: primero el llavero, después el entorno.
-pub fn resolve_key(store: &dyn SecretStore, provider: ProviderId) -> Option<String> {
+pub fn resolve_key(store: &dyn SecretStore, provider: ProviderId) -> Option<Secret> {
     store
         .get(provider)
         .ok()
         .flatten()
         .or_else(|| raggy_llm::api_key(provider))
+        .filter(|value| !value.trim().is_empty())
+        .map(Secret::new)
 }
 
 /// Enmascara una clave mostrando solo sus últimos cuatro caracteres (HU-23).
@@ -156,6 +194,15 @@ mod tests {
 
         assert_eq!(mask("abcd"), "••••");
         assert_eq!(mask(""), "•");
+    }
+
+    #[test]
+    fn el_secreto_no_se_filtra_en_logs() {
+        let secret = Secret::new("sk-super-secreto");
+        assert_eq!(format!("{secret}"), "***");
+        assert_eq!(format!("{secret:?}"), "Secret(***)");
+        assert!(!format!("{secret:?}").contains("secreto"));
+        assert_eq!(secret.expose(), "sk-super-secreto");
     }
 
     #[test]

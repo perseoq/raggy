@@ -54,6 +54,42 @@ impl Default for RagConfig {
     }
 }
 
+impl RagConfig {
+    /// Avisos sobre combinaciones de valores poco recomendables (HU-27).
+    pub fn warnings(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        if self.chunk_size < 200 {
+            warnings.push(
+                "El tamaño de fragmento es muy pequeño y puede dividir en exceso.".to_string(),
+            );
+        }
+        if self.chunk_size > 3000 {
+            warnings.push(
+                "El tamaño de fragmento es muy grande y puede diluir la relevancia.".to_string(),
+            );
+        }
+        if self.top_k > 20 {
+            warnings
+                .push("Recuperar más de 20 fragmentos suele degradar la precisión.".to_string());
+        }
+        if self.similarity_threshold < 0.1 {
+            warnings.push("Un umbral muy bajo dejará pasar contexto poco relevante.".to_string());
+        }
+        if self.similarity_threshold > 0.8 {
+            warnings.push("Un umbral muy alto puede descartar contexto útil.".to_string());
+        }
+        if self.embedding_dimensions < 64 {
+            warnings.push(
+                "Una dimensionalidad de embedding muy baja reduce la calidad semántica."
+                    .to_string(),
+            );
+        }
+
+        warnings
+    }
+}
+
 /// Parámetros del modelo por defecto (HU-13, HU-15).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -91,6 +127,8 @@ pub struct AppConfig {
     pub rag: RagConfig,
     /// Parámetros del modelo.
     pub model: ModelConfig,
+    /// Si el usuario ya ha visto el aviso de privacidad (HU-30).
+    pub data_notice_acknowledged: bool,
 }
 
 impl Default for AppConfig {
@@ -100,6 +138,7 @@ impl Default for AppConfig {
             language: "es".to_string(),
             rag: RagConfig::default(),
             model: ModelConfig::default(),
+            data_notice_acknowledged: false,
         }
     }
 }
@@ -224,6 +263,26 @@ mod tests {
             ..AppConfig::default()
         };
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn avisa_sobre_valores_extremos() {
+        assert!(AppConfig::default().rag.warnings().is_empty());
+
+        let config = AppConfig {
+            rag: RagConfig {
+                chunk_size: 50,
+                top_k: 40,
+                ..RagConfig::default()
+            },
+            ..AppConfig::default()
+        };
+        assert_eq!(config.rag.warnings().len(), 2);
+    }
+
+    #[test]
+    fn el_aviso_de_datos_empieza_pendiente() {
+        assert!(!AppConfig::default().data_notice_acknowledged);
     }
 
     #[test]

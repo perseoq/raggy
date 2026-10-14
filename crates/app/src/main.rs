@@ -5,13 +5,14 @@
 
 use anyhow::Context;
 
-use raggy_core::{AppConfig, AppPaths, APP_NAME, APP_VERSION};
+use raggy_core::{AppConfig, APP_NAME, APP_VERSION};
 use raggy_storage::Storage;
 
 fn main() -> anyhow::Result<()> {
     init_tracing();
 
-    let paths = AppPaths::resolve().context("no se pudo resolver el directorio de datos")?;
+    let paths =
+        raggy_core::paths::resolve().context("no se pudo resolver el directorio de datos")?;
     paths
         .ensure_dirs()
         .context("no se pudieron crear los directorios de datos")?;

@@ -23,3 +23,5 @@ walkdir.workspace = true
 notify.workspace = true
 blake3.workspace = true
 keyring.workspace = true
+zip.workspace = true
+chrono.workspace = true
