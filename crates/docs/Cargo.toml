@@ -12,6 +12,7 @@ homepage.workspace = true
 [dependencies]
 calamine.workspace = true
 csv.workspace = true
+lopdf.workspace = true
 quick-xml.workspace = true
 thiserror.workspace = true
 zip.workspace = true

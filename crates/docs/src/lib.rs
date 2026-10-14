@@ -1,16 +1,17 @@
 //! `raggy-docs` — extracción de texto de documentos para el RAG.
 //!
 //! Convierte documentos distintos de Markdown en una lista de secciones con su
-//! ubicación, lista para el chunking y las citas. En esta fase cubre texto
-//! plano, CSV, Excel (`.xlsx`, `.xls`, `.xlsm`), Word (`.docx`) y PowerPoint
-//! (`.pptx`); las fases siguientes añaden PDF con OCR y los formatos legacy
-//! `.doc`/`.ppt`/`.xls` antiguos (vía LibreOffice).
+//! ubicación, lista para el chunking y las citas. Cubre texto plano, CSV, Excel
+//! (`.xlsx`, `.xls`, `.xlsm`), Word (`.docx`), PowerPoint (`.pptx`) y PDF con
+//! capa de texto; las fases siguientes añaden OCR de PDF escaneados y los
+//! formatos legacy `.doc`/`.ppt` (vía LibreOffice).
 //!
 //! El crate no depende del motor RAG ni de la interfaz: solo lee el archivo y
 //! devuelve secciones.
 
 pub mod csv;
 pub mod excel;
+pub mod pdf;
 pub mod slides;
 pub mod text;
 pub mod word;
@@ -55,6 +56,8 @@ pub enum DocKind {
     Word,
     /// Presentación de PowerPoint.
     PowerPoint,
+    /// Documento PDF con capa de texto.
+    Pdf,
 }
 
 impl DocKind {
@@ -66,6 +69,7 @@ impl DocKind {
             "xlsx" | "xlsm" | "xlsb" | "xls" => Some(Self::Excel),
             "docx" => Some(Self::Word),
             "pptx" => Some(Self::PowerPoint),
+            "pdf" => Some(Self::Pdf),
             _ => None,
         }
     }
@@ -99,6 +103,8 @@ pub enum Location {
     },
     /// Número de diapositiva de una presentación (1-based).
     Slide(u32),
+    /// Número de página de un PDF (1-based).
+    Page(u32),
 }
 
 impl Location {
@@ -111,6 +117,7 @@ impl Location {
                 format!("hoja {name}, filas {start}-{end}")
             }
             Location::Slide(number) => format!("diapositiva {number}"),
+            Location::Page(number) => format!("página {number}"),
         }
     }
 }
@@ -169,6 +176,7 @@ pub fn extract(path: &Path, options: &ExtractOptions) -> Result<ExtractedDocumen
         DocKind::Excel => excel::extract(path)?,
         DocKind::Word => word::extract(&read_bytes(path)?)?,
         DocKind::PowerPoint => slides::extract(&read_bytes(path)?)?,
+        DocKind::Pdf => pdf::extract(&read_bytes(path)?)?,
     })
 }
 
@@ -192,7 +200,8 @@ mod tests {
         assert_eq!(DocKind::from_extension("xls"), Some(DocKind::Excel));
         assert_eq!(DocKind::from_extension("docx"), Some(DocKind::Word));
         assert_eq!(DocKind::from_extension("pptx"), Some(DocKind::PowerPoint));
-        assert_eq!(DocKind::from_extension("pdf"), None);
+        assert_eq!(DocKind::from_extension("pdf"), Some(DocKind::Pdf));
+        assert_eq!(DocKind::from_extension("rtf"), None);
     }
 
     #[test]
@@ -209,12 +218,13 @@ mod tests {
             "hoja Ventas, filas 1-40"
         );
         assert_eq!(Location::Slide(3).label(), "diapositiva 3");
+        assert_eq!(Location::Page(7).label(), "página 7");
     }
 
     #[test]
     fn extension_no_soportada_da_error() {
         let result = extract(
-            Path::new("/tmp/inexistente.pdf"),
+            Path::new("/tmp/inexistente.rtf"),
             &ExtractOptions::default(),
         );
         assert!(matches!(result, Err(ExtractError::Unsupported(_))));
