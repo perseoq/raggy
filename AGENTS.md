@@ -19,9 +19,12 @@ cargo test --workspace --all-targets
 cargo build --release
 ```
 
-## Flujo obligatorio para cada cambio
+## Flujo obligatorio al terminar cada tarea
 
-Cada cambio en `main` se publica como una versión. Sigue estos pasos en orden:
+**Nada de esto se pregunta ni se deja para después.** Al terminar cualquier tarea
+—por pequeña, técnica o documental que sea— hay que **compilar, hacer push y
+crear el release en GitHub** de forma automática. Cada tarea se publica como una
+versión. Sigue estos pasos en orden:
 
 1. **Documenta la lista de cambios** en `CHANGELOG.md`, bajo `## [No publicado]`,
    con los encabezados que correspondan (`### Añadido`, `### Cambiado`,

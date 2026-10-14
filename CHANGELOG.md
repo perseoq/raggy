@@ -9,6 +9,14 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [1.0.30] - 2026-10-14
+
+### Cambiado
+
+- `AGENTS.md`: el flujo de publicación (**compilar, push y release en GitHub**)
+  pasa a ser **obligatorio y automático al terminar cada tarea**, sin preguntar
+  ni dejarlo para después.
+
 ## [1.0.29] - 2026-10-14
 
 ### Añadido
