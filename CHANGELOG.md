@@ -9,6 +9,22 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.1.0] - 2026-10-14
+
+### Cambiado
+
+- **Citas más precisas por formato**. Cada fragmento cita su propia ubicación en
+  el documento de origen:
+  - **Excel y CSV**: hoja y rango de celdas con letras de columna
+    (`hoja Ventas, A2:D20`, `hoja 1, A1:C100`), con cada fila numerada y una
+    cabecera que mapea columna→letra (`A=nombre, B=edad`).
+  - **Word**: número de página aproximado a partir de los saltos explícitos y de
+    las marcas `lastRenderedPageBreak` del `.docx` (si no hay marcas, se cae a
+    líneas como antes).
+  - **PDF** y **PowerPoint**: se mantienen página y diapositiva.
+  - **Markdown, texto y código**: líneas, como hasta ahora.
+- La ubicación se calcula por **fragmento** (no por sección) en el chunker.
+
 ## [2.0.0] - 2026-10-14
 
 ### Añadido

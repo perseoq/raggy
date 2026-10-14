@@ -52,8 +52,11 @@ Windows.
   documentación.
 - **Streaming** token a token, con botón para detener la generación.
 - **Prompt estricto**: el modelo solo responde con el contexto recuperado, cita
-  `[archivo:línea-línea]` y, si no está en la documentación, responde
+  la fuente y, si no está en la documentación, responde
   «No encuentro esa información en los archivos indexados».
+- **Citas precisas por formato**: por **líneas** en Markdown y código, por
+  **página** en PDF y Word, por **diapositiva** en PowerPoint, y por **hoja y
+  coordenadas de celda** en Excel y CSV (`hoja Ventas, A2:D20`).
 - **Citas clicables** en cada respuesta para abrir el fragmento de origen.
 - Temperatura `0.1` por defecto para minimizar invenciones.
 

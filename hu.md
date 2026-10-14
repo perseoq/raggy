@@ -159,6 +159,8 @@ documentos soportados,
 
 **Criterios de aceptación:**
 - Cada afirmación relevante incluye referencia al archivo fuente.
+- La cita indica la ubicación según el formato: líneas (Markdown/código), página
+  (PDF/Word), diapositiva (PowerPoint) o hoja + coordenadas de celda (Excel/CSV).
 - Las citas son clicables y abren el archivo en la vista previa.
 - Si el modelo no cita, la respuesta se marca como "no anclada".
 
