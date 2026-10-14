@@ -2,15 +2,16 @@
 //!
 //! Convierte documentos distintos de Markdown en una lista de secciones con su
 //! ubicación, lista para el chunking y las citas. En esta fase cubre texto
-//! plano, CSV, Excel (`.xlsx`, `.xls`, `.xlsm`) y Word (`.docx`); las fases
-//! siguientes añaden PowerPoint, PDF con OCR y los formatos legacy `.doc`/`.ppt`
-//! (vía LibreOffice).
+//! plano, CSV, Excel (`.xlsx`, `.xls`, `.xlsm`), Word (`.docx`) y PowerPoint
+//! (`.pptx`); las fases siguientes añaden PDF con OCR y los formatos legacy
+//! `.doc`/`.ppt`/`.xls` antiguos (vía LibreOffice).
 //!
 //! El crate no depende del motor RAG ni de la interfaz: solo lee el archivo y
 //! devuelve secciones.
 
 pub mod csv;
 pub mod excel;
+pub mod slides;
 pub mod text;
 pub mod word;
 
@@ -52,6 +53,8 @@ pub enum DocKind {
     Excel,
     /// Documento de Word.
     Word,
+    /// Presentación de PowerPoint.
+    PowerPoint,
 }
 
 impl DocKind {
@@ -62,6 +65,7 @@ impl DocKind {
             "csv" => Some(Self::Csv),
             "xlsx" | "xlsm" | "xlsb" | "xls" => Some(Self::Excel),
             "docx" => Some(Self::Word),
+            "pptx" => Some(Self::PowerPoint),
             _ => None,
         }
     }
@@ -93,6 +97,8 @@ pub enum Location {
         /// Última fila incluida.
         end: usize,
     },
+    /// Número de diapositiva de una presentación (1-based).
+    Slide(u32),
 }
 
 impl Location {
@@ -104,6 +110,7 @@ impl Location {
             Location::Sheet { name, start, end } => {
                 format!("hoja {name}, filas {start}-{end}")
             }
+            Location::Slide(number) => format!("diapositiva {number}"),
         }
     }
 }
@@ -161,6 +168,7 @@ pub fn extract(path: &Path, options: &ExtractOptions) -> Result<ExtractedDocumen
         DocKind::Csv => csv::extract(&read_bytes(path)?)?,
         DocKind::Excel => excel::extract(path)?,
         DocKind::Word => word::extract(&read_bytes(path)?)?,
+        DocKind::PowerPoint => slides::extract(&read_bytes(path)?)?,
     })
 }
 
@@ -183,6 +191,7 @@ mod tests {
         assert_eq!(DocKind::from_extension("xlsx"), Some(DocKind::Excel));
         assert_eq!(DocKind::from_extension("xls"), Some(DocKind::Excel));
         assert_eq!(DocKind::from_extension("docx"), Some(DocKind::Word));
+        assert_eq!(DocKind::from_extension("pptx"), Some(DocKind::PowerPoint));
         assert_eq!(DocKind::from_extension("pdf"), None);
     }
 
@@ -199,6 +208,7 @@ mod tests {
             .label(),
             "hoja Ventas, filas 1-40"
         );
+        assert_eq!(Location::Slide(3).label(), "diapositiva 3");
     }
 
     #[test]
