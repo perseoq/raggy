@@ -106,6 +106,8 @@ pub fn is_indexable(path: &Path) -> bool {
             | "xls"
             | "pptx"
             | "pdf"
+            | "doc"
+            | "ppt"
     ) {
         return true;
     }
@@ -127,11 +129,11 @@ pub fn scan_indexable_files(root: &Path) -> Vec<PathBuf> {
 /// Extensiones indexables, para los filtros de los diálogos.
 pub const INDEXABLE_EXTENSIONS: &[&str] = &[
     "md", "markdown", "mdx", "txt", "csv", "docx", "xlsx", "xlsm", "xlsb", "xls", "pptx", "pdf",
-    "py", "pyi", "rs", "c", "h", "cc", "cpp", "cxx", "hpp", "hh", "cs", "go", "java", "kt", "kts",
-    "js", "mjs", "jsx", "ts", "tsx", "rb", "php", "swift", "m", "mm", "scala", "lua", "pl", "r",
-    "dart", "ex", "exs", "clj", "sh", "bash", "zsh", "ps1", "sql", "json", "yaml", "yml", "toml",
-    "xml", "html", "css", "scss", "vue", "svelte", "zig", "nim", "jl", "groovy", "tf", "proto",
-    "graphql", "ini", "cfg", "conf", "asm", "sol",
+    "doc", "ppt", "py", "pyi", "rs", "c", "h", "cc", "cpp", "cxx", "hpp", "hh", "cs", "go", "java",
+    "kt", "kts", "js", "mjs", "jsx", "ts", "tsx", "rb", "php", "swift", "m", "mm", "scala", "lua",
+    "pl", "r", "dart", "ex", "exs", "clj", "sh", "bash", "zsh", "ps1", "sql", "json", "yaml",
+    "yml", "toml", "xml", "html", "css", "scss", "vue", "svelte", "zig", "nim", "jl", "groovy",
+    "tf", "proto", "graphql", "ini", "cfg", "conf", "asm", "sol",
 ];
 
 /// Indexa una carpeta de forma incremental.
@@ -596,6 +598,8 @@ mod tests {
         assert!(is_indexable(Path::new("antiguo.xls")));
         assert!(is_indexable(Path::new("charla.pptx")));
         assert!(is_indexable(Path::new("informe.pdf")));
+        assert!(is_indexable(Path::new("antiguo.doc")));
+        assert!(is_indexable(Path::new("presentacion.ppt")));
 
         assert!(!is_indexable(Path::new("foto.png")));
         assert!(!is_indexable(Path::new("video.mp4")));

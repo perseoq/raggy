@@ -87,9 +87,8 @@ impl Ocr {
             .as_ref()
             .ok_or_else(|| ExtractError::Parse("pdftoppm no está disponible".to_string()))?;
 
-        let directory = temp_directory().ok_or_else(|| {
-            ExtractError::Parse("no se pudo crear un directorio temporal".to_string())
-        })?;
+        let directory =
+            crate::temp_directory("ocr").map_err(|error| ExtractError::Parse(error.to_string()))?;
         let prefix = directory.join("page");
         let page_number = page.to_string();
 
@@ -152,18 +151,6 @@ impl Ocr {
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
-}
-
-/// Crea un directorio temporal único para el rasterizado.
-fn temp_directory() -> Option<PathBuf> {
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let directory =
-        std::env::temp_dir().join(format!("raggy-ocr-{}-{sequence}", std::process::id()));
-    std::fs::create_dir_all(&directory).ok()?;
-    Some(directory)
 }
 
 /// Primera imagen PNG de un directorio.

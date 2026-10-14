@@ -1,10 +1,11 @@
-//! Detección de las herramientas externas que usa el OCR y pistas de
+//! Detección de las herramientas externas que usa la extracción y pistas de
 //! instalación por sistema operativo.
 //!
 //! El OCR se apoya en el binario `tesseract` (con su paquete de idioma, p. ej.
-//! `spa`) y, para rasterizar páginas de PDF, en `pdftoppm` (Poppler). Ninguno se
-//! empaqueta con la aplicación: se detectan en el sistema y, si faltan, se avisa
-//! con el comando de instalación adecuado.
+//! `spa`) y, para rasterizar páginas de PDF, en `pdftoppm` (Poppler). Los
+//! formatos legacy `.doc`/`.ppt` se convierten con LibreOffice headless. Ninguna
+//! se empaqueta con la aplicación: se detectan en el sistema y, si faltan, se
+//! avisa con el comando de instalación adecuado.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -16,6 +17,8 @@ pub enum ExternalTool {
     Tesseract,
     /// Rasterizador de PDF (Poppler).
     Poppler,
+    /// Suite ofimática para convertir formatos legacy.
+    LibreOffice,
 }
 
 impl ExternalTool {
@@ -24,6 +27,7 @@ impl ExternalTool {
         match self {
             ExternalTool::Tesseract => "tesseract",
             ExternalTool::Poppler => "pdftoppm",
+            ExternalTool::LibreOffice => "soffice",
         }
     }
 
@@ -32,6 +36,7 @@ impl ExternalTool {
         match self {
             ExternalTool::Tesseract => "RAGGY_TESSERACT",
             ExternalTool::Poppler => "RAGGY_PDFTOPPM",
+            ExternalTool::LibreOffice => "RAGGY_SOFFICE",
         }
     }
 }
@@ -79,31 +84,84 @@ impl Tools {
 
 /// Busca un ejecutable en el `PATH` (o en su variable de entorno).
 pub fn find_program(tool: ExternalTool) -> Option<PathBuf> {
-    if let Ok(explicit) = std::env::var(tool.env_var()) {
-        let explicit = explicit.trim();
-        if !explicit.is_empty() {
-            let path = PathBuf::from(explicit);
-            if path.is_file() {
-                return Some(path);
-            }
-        }
+    if let Some(explicit) = explicit_path(tool.env_var()) {
+        return Some(explicit);
     }
 
     let path = std::env::var_os("PATH")?;
     for directory in std::env::split_paths(&path) {
-        let candidate = directory.join(tool.program());
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-        #[cfg(windows)]
-        {
-            let with_exe = directory.join(format!("{}.exe", tool.program()));
-            if with_exe.is_file() {
-                return Some(with_exe);
-            }
+        if let Some(found) = executable_in(&directory, tool.program()) {
+            return Some(found);
         }
     }
     None
+}
+
+/// Localiza LibreOffice, que puede llamarse `soffice` o `libreoffice` y, en
+/// macOS y Windows, vivir en rutas conocidas aunque no esté en el `PATH`.
+pub fn find_libreoffice() -> Option<PathBuf> {
+    if let Some(explicit) = explicit_path(ExternalTool::LibreOffice.env_var()) {
+        return Some(explicit);
+    }
+
+    if let Some(path) = std::env::var_os("PATH") {
+        for directory in std::env::split_paths(&path) {
+            for name in ["soffice", "libreoffice"] {
+                if let Some(found) = executable_in(&directory, name) {
+                    return Some(found);
+                }
+            }
+        }
+    }
+
+    known_libreoffice_paths()
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+}
+
+/// Rutas típicas de LibreOffice fuera del `PATH`.
+fn known_libreoffice_paths() -> Vec<PathBuf> {
+    #[allow(unused_mut)]
+    let mut paths = Vec::new();
+    #[cfg(target_os = "macos")]
+    paths.push(PathBuf::from(
+        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+    ));
+    #[cfg(windows)]
+    {
+        for variable in ["ProgramFiles", "ProgramFiles(x86)"] {
+            if let Ok(base) = std::env::var(variable) {
+                paths.push(Path::new(&base).join("LibreOffice\\program\\soffice.exe"));
+            }
+        }
+    }
+    paths
+}
+
+/// Devuelve la ruta de un ejecutable si existe (con `.exe` en Windows).
+fn executable_in(directory: &Path, name: &str) -> Option<PathBuf> {
+    let candidate = directory.join(name);
+    if candidate.is_file() {
+        return Some(candidate);
+    }
+    #[cfg(windows)]
+    {
+        let with_exe = directory.join(format!("{name}.exe"));
+        if with_exe.is_file() {
+            return Some(with_exe);
+        }
+    }
+    None
+}
+
+/// Lee una ruta explícita de una variable de entorno, si es válida.
+fn explicit_path(variable: &str) -> Option<PathBuf> {
+    let value = std::env::var_os(variable)?;
+    let path = PathBuf::from(value);
+    if path.as_os_str().is_empty() {
+        return None;
+    }
+    path.is_file().then_some(path)
 }
 
 /// Idiomas que reconoce `tesseract --list-langs`.
@@ -145,11 +203,14 @@ pub fn install_hint(tool: ExternalTool) -> String {
             "sudo apk add tesseract-ocr tesseract-ocr-data-spa".to_string()
         }
         (ExternalTool::Tesseract, "bsd") => {
-            "instala Tesseract y los datos de idioma español (spa) desde los ports/packages".to_string()
+            "instala Tesseract y los datos de idioma español (spa) desde los ports/packages"
+                .to_string()
         }
         (ExternalTool::Tesseract, "macos") => "brew install tesseract tesseract-lang".to_string(),
         (ExternalTool::Tesseract, "windows") => {
-            "instala Tesseract (compilación de UB Mannheim) y añade spa.traineddata a la carpeta tessdata, o define TESSDATA_PREFIX".to_string()
+            "instala Tesseract (compilación de UB Mannheim) y añade spa.traineddata a la carpeta \
+             tessdata, o define TESSDATA_PREFIX"
+                .to_string()
         }
         (ExternalTool::Tesseract, _) => {
             "instala Tesseract y el paquete de idioma español (spa)".to_string()
@@ -168,6 +229,20 @@ pub fn install_hint(tool: ExternalTool) -> String {
             "descarga los binarios de Poppler para Windows y añádelos al PATH".to_string()
         }
         (ExternalTool::Poppler, _) => "instala las herramientas de Poppler (pdftoppm)".to_string(),
+
+        (ExternalTool::LibreOffice, "debian") => "sudo apt install libreoffice".to_string(),
+        (ExternalTool::LibreOffice, "fedora") => "sudo dnf install libreoffice".to_string(),
+        (ExternalTool::LibreOffice, "arch") => "sudo pacman -S libreoffice-still".to_string(),
+        (ExternalTool::LibreOffice, "suse") => "sudo zypper install libreoffice".to_string(),
+        (ExternalTool::LibreOffice, "alpine") => "sudo apk add libreoffice".to_string(),
+        (ExternalTool::LibreOffice, "bsd") => {
+            "instala LibreOffice desde los ports/packages".to_string()
+        }
+        (ExternalTool::LibreOffice, "macos") => "brew install --cask libreoffice".to_string(),
+        (ExternalTool::LibreOffice, "windows") => {
+            "instala LibreOffice desde https://es.libreoffice.org/descarga/libreoffice/".to_string()
+        }
+        (ExternalTool::LibreOffice, _) => "instala LibreOffice".to_string(),
     }
 }
 
@@ -202,7 +277,7 @@ fn linux_family() -> &'static str {
         (
             "fedora",
             [
-                "fedora", "rhel", "centos", "rocky", "alma", "amzn", "ol", "oracle",
+                "fedora", "rhel", "centos", "rocky", "alma", "amzn", "oracle",
             ]
             .as_slice(),
         ),
@@ -223,8 +298,13 @@ mod tests {
 
     #[test]
     fn las_pistas_de_instalacion_no_estan_vacias() {
-        assert!(!install_hint(ExternalTool::Tesseract).is_empty());
-        assert!(!install_hint(ExternalTool::Poppler).is_empty());
+        for tool in [
+            ExternalTool::Tesseract,
+            ExternalTool::Poppler,
+            ExternalTool::LibreOffice,
+        ] {
+            assert!(!install_hint(tool).is_empty());
+        }
     }
 
     #[test]

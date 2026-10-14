@@ -2,16 +2,17 @@
 //!
 //! Convierte documentos distintos de Markdown en una lista de secciones con su
 //! ubicación, lista para el chunking y las citas. Cubre texto plano, CSV, Excel
-//! (`.xlsx`, `.xls`, `.xlsm`), Word (`.docx`), PowerPoint (`.pptx`) y PDF con
-//! capa de texto; los PDF escaneados se pueden reconocer por OCR con Tesseract
-//! (rasterizando con Poppler), y los formatos legacy `.doc`/`.ppt` se abordan en
-//! una fase posterior vía LibreOffice.
+//! (`.xlsx`, `.xls`, `.xlsm`), Word (`.docx`), PowerPoint (`.pptx`) y PDF; los
+//! PDF escaneados se reconocen por OCR con Tesseract (rasterizando con Poppler)
+//! y los formatos legacy `.doc`/`.ppt` se convierten con LibreOffice si está
+//! instalado.
 //!
 //! El crate no depende del motor RAG ni de la interfaz: solo lee el archivo y
 //! devuelve secciones.
 
 pub mod csv;
 pub mod excel;
+pub mod legacy;
 pub mod ocr;
 pub mod pdf;
 pub mod slides;
@@ -19,7 +20,19 @@ pub mod text;
 pub mod tools;
 pub mod word;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Crea un directorio temporal único con el prefijo indicado.
+pub(crate) fn temp_directory(prefix: &str) -> std::io::Result<PathBuf> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let directory =
+        std::env::temp_dir().join(format!("raggy-{prefix}-{}-{sequence}", std::process::id()));
+    std::fs::create_dir_all(&directory)?;
+    Ok(directory)
+}
 
 /// Error de extracción de un documento.
 #[derive(Debug, thiserror::Error)]
@@ -61,6 +74,10 @@ pub enum DocKind {
     PowerPoint,
     /// Documento PDF.
     Pdf,
+    /// Documento de Word en formato legacy (`.doc`), requiere LibreOffice.
+    WordLegacy,
+    /// Presentación en formato legacy (`.ppt`), requiere LibreOffice.
+    PresentationLegacy,
 }
 
 impl DocKind {
@@ -73,6 +90,8 @@ impl DocKind {
             "docx" => Some(Self::Word),
             "pptx" => Some(Self::PowerPoint),
             "pdf" => Some(Self::Pdf),
+            "doc" => Some(Self::WordLegacy),
+            "ppt" => Some(Self::PresentationLegacy),
             _ => None,
         }
     }
@@ -204,6 +223,8 @@ pub fn extract(path: &Path, options: &ExtractOptions) -> Result<ExtractedDocumen
         DocKind::Word => word::extract(&read_bytes(path)?)?,
         DocKind::PowerPoint => slides::extract(&read_bytes(path)?)?,
         DocKind::Pdf => pdf::extract(path, options)?,
+        DocKind::WordLegacy => legacy::extract(path, legacy::LegacyTarget::Word)?,
+        DocKind::PresentationLegacy => legacy::extract(path, legacy::LegacyTarget::Presentation)?,
     })
 }
 
@@ -228,6 +249,11 @@ mod tests {
         assert_eq!(DocKind::from_extension("docx"), Some(DocKind::Word));
         assert_eq!(DocKind::from_extension("pptx"), Some(DocKind::PowerPoint));
         assert_eq!(DocKind::from_extension("pdf"), Some(DocKind::Pdf));
+        assert_eq!(DocKind::from_extension("doc"), Some(DocKind::WordLegacy));
+        assert_eq!(
+            DocKind::from_extension("ppt"),
+            Some(DocKind::PresentationLegacy)
+        );
         assert_eq!(DocKind::from_extension("rtf"), None);
     }
 
