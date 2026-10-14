@@ -13,8 +13,8 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use raggy_llm::{
-    build_system_prompt, ChatDelta, ChatMessage, ChatRequest, ContextBlock, LlmProvider,
-    ProviderError, ProviderId,
+    build_system_prompt, ArtifactContext, ChatDelta, ChatMessage, ChatRequest, ContextBlock,
+    LlmProvider, ProviderError, ProviderId,
 };
 use raggy_rag::{Citation, RetrievedChunk};
 use raggy_storage::{Message, Storage};
@@ -38,17 +38,18 @@ pub fn context_from_retrieved(chunks: &[RetrievedChunk]) -> (Vec<ContextBlock>, 
     (blocks, citations)
 }
 
-/// Compone la petición de chat: prompt de sistema estricto (HU-14), historial
-/// de la sesión y mensaje del usuario.
+/// Compone la petición de chat: prompt de sistema estricto (HU-14), memoria de
+/// artefactos (HU-21), historial de la sesión y mensaje del usuario.
 pub fn compose_request(
     model: &str,
     temperature: f32,
     max_tokens: u32,
     context: &[ContextBlock],
+    artifacts: &[ArtifactContext],
     history: &[Message],
     user_message: &str,
 ) -> ChatRequest {
-    let mut messages = vec![ChatMessage::system(build_system_prompt(context))];
+    let mut messages = vec![ChatMessage::system(build_system_prompt(context, artifacts))];
     for message in history {
         let role = match message.role.as_str() {
             "user" => raggy_llm::Role::User,

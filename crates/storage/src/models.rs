@@ -209,12 +209,47 @@ pub struct Artifact {
     pub session_id: String,
     /// Nombre del archivo declarado por el modelo.
     pub name: String,
-    /// Ruta donde se guardó en disco.
+    /// Ruta relativa dentro del proyecto.
+    pub relative_path: String,
+    /// Ruta absoluta donde se guardó.
     pub path: String,
+    /// Lenguaje del bloque de código, si se conoce.
+    pub language: Option<String>,
+    /// Contenido guardado, para dar continuidad (HU-21).
+    pub content: String,
     /// Modelo que lo generó, si se conoce.
     pub model: Option<String>,
+    /// Si el registro está archivado (no se borra el archivo físico).
+    pub archived: bool,
     /// Fecha de creación en RFC 3339.
     pub created_at: String,
+}
+
+impl Artifact {
+    /// Crea el registro de un artefacto recién guardado.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        session_id: impl Into<String>,
+        name: impl Into<String>,
+        relative_path: impl Into<String>,
+        path: impl Into<String>,
+        language: Option<String>,
+        content: impl Into<String>,
+        model: Option<String>,
+    ) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            session_id: session_id.into(),
+            name: name.into(),
+            relative_path: relative_path.into(),
+            path: path.into(),
+            language,
+            content: content.into(),
+            model,
+            archived: false,
+            created_at: chrono::Utc::now().to_rfc3339(),
+        }
+    }
 }
 
 #[cfg(test)]

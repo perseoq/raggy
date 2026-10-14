@@ -12,12 +12,13 @@ use raggy_core::chat::{compose_request, context_from_retrieved};
 use raggy_core::index::{IndexEvent, IndexOptions, IndexPhase, IndexWorker};
 use raggy_core::watch::FolderWatcher;
 use raggy_core::{
-    search_folder, AppConfig, AppPaths, ChatEvent, ChatWorker, KeyringStore, ProviderFactory,
-    RagConfig, SecretStore, APP_NAME, APP_VERSION,
+    artifacts_for_prompt, relative_to, save_artifact, search_folder, AppConfig, AppPaths,
+    ChatEvent, ChatWorker, ConflictPolicy, KeyringStore, ProviderFactory, RagConfig, SaveOutcome,
+    SecretStore, APP_NAME, APP_VERSION,
 };
-use raggy_llm::ProviderId;
+use raggy_llm::{extract_code_blocks, suggest_filename, CodeBlock, ProviderId};
 use raggy_rag::{Chunk, ChunkingOptions, RetrievedChunk, RetrieverOptions};
-use raggy_storage::{Document, Folder, Message, Session, Storage};
+use raggy_storage::{Artifact, Document, Folder, Message, Session, Storage};
 
 /// Tiempo de espera antes de reindexar tras un cambio detectado en disco.
 const REINDEX_DEBOUNCE: Duration = Duration::from_millis(1200);
@@ -52,6 +53,36 @@ struct Failure {
     availability: bool,
 }
 
+/// Descarga individual pendiente de resolver un conflicto de nombre (HU-17).
+struct PendingDownload {
+    name: String,
+    language: Option<String>,
+    content: String,
+    root: PathBuf,
+}
+
+/// Elemento de una descarga por lote (HU-19).
+struct BatchItem {
+    relative: String,
+    language: Option<String>,
+    content: String,
+}
+
+/// Estado del diálogo de descarga por lote (HU-19).
+struct BatchDownload {
+    session_id: String,
+    root: PathBuf,
+    items: Vec<BatchItem>,
+    overwrite: bool,
+}
+
+/// Ámbito de la vista de artefactos (HU-20).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ArtifactScope {
+    Session,
+    Folder,
+}
+
 /// Estado de una carpeta en la interfaz.
 struct FolderEntry {
     folder: Folder,
@@ -80,6 +111,14 @@ struct TopActions {
     reindex_all: bool,
     settings: bool,
     keys: bool,
+    artifacts: bool,
+}
+
+/// Acciones de la vista de artefactos.
+enum ArtifactAction {
+    Open(PathBuf),
+    Archive(String, bool),
+    Delete(String),
 }
 
 /// Acciones solicitadas desde el panel lateral.
@@ -101,10 +140,23 @@ enum CentralAction {
     OpenDocument(String),
     SendMessage,
     StopGeneration,
-    UpdateModel { provider: ProviderId, model: String },
-    UpdateFallback { provider: Option<ProviderId> },
+    UpdateModel {
+        provider: ProviderId,
+        model: String,
+    },
+    UpdateFallback {
+        provider: Option<ProviderId>,
+    },
     RetryWithFallback,
     OpenKeys,
+    CopyCode(String),
+    DownloadBlock {
+        message_id: String,
+        block_index: usize,
+    },
+    DownloadAll {
+        message_id: String,
+    },
 }
 
 /// Estado raíz de la interfaz.
@@ -142,6 +194,14 @@ pub struct RaggyApp {
     test_tx: Sender<(ProviderId, Result<Vec<String>, String>)>,
     test_rx: Receiver<(ProviderId, Result<Vec<String>, String>)>,
     last_failure: Option<Failure>,
+    artifacts: Vec<Artifact>,
+    artifacts_open: bool,
+    artifact_scope: ArtifactScope,
+    code_edits: HashMap<String, String>,
+    previews: HashMap<String, bool>,
+    pending_download: Option<PendingDownload>,
+    batch: Option<BatchDownload>,
+    last_download_dir: Option<PathBuf>,
     status: String,
     fatal: Option<String>,
 }
@@ -189,6 +249,14 @@ impl RaggyApp {
             test_tx,
             test_rx,
             last_failure: None,
+            artifacts: Vec::new(),
+            artifacts_open: false,
+            artifact_scope: ArtifactScope::Session,
+            code_edits: HashMap::new(),
+            previews: HashMap::new(),
+            pending_download: None,
+            batch: None,
+            last_download_dir: None,
             status: String::new(),
             fatal: None,
         };
@@ -502,6 +570,7 @@ impl RaggyApp {
             Ok(Some(session)) => {
                 self.selected_folder = Some(session.folder_id.clone());
                 self.messages = storage.list_messages(&id).unwrap_or_default();
+                self.artifacts = storage.list_artifacts_by_session(&id).unwrap_or_default();
                 self.active_session = Some(session);
                 self.chat_input.clear();
                 self.chat_error = None;
@@ -676,6 +745,7 @@ impl RaggyApp {
             self.config.model.temperature,
             self.config.model.max_tokens,
             &blocks,
+            &artifacts_for_prompt(&self.artifacts, &prompt),
             &history,
             &prompt,
         );
@@ -740,6 +810,304 @@ impl RaggyApp {
                     self.reload_messages(&session_id);
                 }
             }
+        }
+    }
+
+    // ------------------------------------------------------------ artefactos
+
+    fn refresh_artifacts(&mut self) {
+        self.artifacts.clear();
+        let Some(storage) = &self.storage else {
+            return;
+        };
+        if let Some(session) = &self.active_session {
+            self.artifacts = storage
+                .list_artifacts_by_session(&session.id)
+                .unwrap_or_default();
+        }
+    }
+
+    fn artifact_scope_list(&self) -> Vec<Artifact> {
+        let Some(storage) = &self.storage else {
+            return Vec::new();
+        };
+        match self.artifact_scope {
+            ArtifactScope::Session => self.artifacts.clone(),
+            ArtifactScope::Folder => self
+                .selected_folder
+                .as_ref()
+                .and_then(|folder| storage.list_artifacts_by_folder(folder).ok())
+                .unwrap_or_default(),
+        }
+    }
+
+    /// Extrae los bloques de código de un mensaje.
+    fn code_blocks(&self, message_id: &str) -> Vec<CodeBlock> {
+        self.messages
+            .iter()
+            .find(|message| message.id == message_id)
+            .map(|message| extract_code_blocks(&message.content))
+            .unwrap_or_default()
+    }
+
+    /// Nombre propuesto para un bloque: el editado, el declarado o uno genérico.
+    fn proposed_name(&self, message_id: &str, index: usize, block: &CodeBlock) -> String {
+        let key = format!("{message_id}:{index}");
+        if let Some(edited) = self.code_edits.get(&key) {
+            if !edited.trim().is_empty() {
+                return edited.clone();
+            }
+        }
+        block
+            .filename
+            .clone()
+            .unwrap_or_else(|| suggest_filename(block.language.as_deref(), index))
+    }
+
+    fn pick_download_dir(&self) -> Option<PathBuf> {
+        let mut dialog = rfd::FileDialog::new().set_title("Elige la carpeta de destino");
+        if let Some(directory) = &self.last_download_dir {
+            dialog = dialog.set_directory(directory);
+        }
+        dialog.pick_folder()
+    }
+
+    /// Registra un artefacto tras guardarlo en disco (HU-20).
+    fn register_artifact(&mut self, root: &Path, path: &Path, block: &CodeBlock) {
+        let Some(session) = self.active_session.clone() else {
+            return;
+        };
+        let relative = relative_to(root, path);
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| relative.clone());
+        let artifact = Artifact::new(
+            &session.id,
+            name,
+            relative,
+            path.to_string_lossy().to_string(),
+            block.language.clone(),
+            &block.content,
+            Some(session.model.clone()),
+        );
+
+        if let Some(storage) = &self.storage {
+            if let Err(error) = storage.add_artifact(&artifact) {
+                self.status = format!("No se pudo registrar el artefacto: {error}");
+                return;
+            }
+        }
+
+        self.status = format!("Guardado en {}.", path.display());
+        self.artifacts.push(artifact);
+    }
+
+    fn download_block(&mut self, message_id: String, block_index: usize) {
+        let blocks = self.code_blocks(&message_id);
+        let Some(block) = blocks.get(block_index).cloned() else {
+            return;
+        };
+        let name = self.proposed_name(&message_id, block_index, &block);
+        let Some(root) = self.pick_download_dir() else {
+            return;
+        };
+        self.last_download_dir = Some(root.clone());
+
+        match save_artifact(&root, &name, &block.content, ConflictPolicy::Fail) {
+            Ok(SaveOutcome::Written(path)) | Ok(SaveOutcome::Renamed(path)) => {
+                self.register_artifact(&root, &path, &block);
+            }
+            Ok(SaveOutcome::Exists(path)) => {
+                self.pending_download = Some(PendingDownload {
+                    name,
+                    language: block.language.clone(),
+                    content: block.content.clone(),
+                    root,
+                });
+                self.status = format!("{} ya existe. Elige qué hacer.", path.display());
+            }
+            Err(error) => self.status = format!("No se pudo guardar: {error}"),
+        }
+    }
+
+    fn resolve_conflict(&mut self, policy: ConflictPolicy) {
+        let Some(pending) = self.pending_download.take() else {
+            return;
+        };
+        let block = CodeBlock {
+            language: pending.language.clone(),
+            filename: Some(pending.name.clone()),
+            content: pending.content.clone(),
+            start_line: 0,
+        };
+
+        match save_artifact(&pending.root, &pending.name, &pending.content, policy) {
+            Ok(SaveOutcome::Written(path)) | Ok(SaveOutcome::Renamed(path)) => {
+                self.register_artifact(&pending.root, &path, &block);
+            }
+            Ok(SaveOutcome::Exists(path)) => {
+                self.status = format!("{} sigue existiendo.", path.display());
+            }
+            Err(error) => self.status = format!("No se pudo guardar: {error}"),
+        }
+    }
+
+    fn start_download_all(&mut self, message_id: String) {
+        let blocks = self.code_blocks(&message_id);
+        if blocks.is_empty() {
+            return;
+        }
+        let Some(root) = self.pick_download_dir() else {
+            return;
+        };
+        self.last_download_dir = Some(root.clone());
+
+        let items = blocks
+            .iter()
+            .enumerate()
+            .map(|(index, block)| BatchItem {
+                relative: self.proposed_name(&message_id, index, block),
+                language: block.language.clone(),
+                content: block.content.clone(),
+            })
+            .collect();
+
+        self.batch = Some(BatchDownload {
+            session_id: self
+                .active_session
+                .as_ref()
+                .map(|session| session.id.clone())
+                .unwrap_or_default(),
+            root,
+            items,
+            overwrite: false,
+        });
+    }
+
+    fn confirm_batch(&mut self) {
+        let Some(batch) = self.batch.take() else {
+            return;
+        };
+        let policy = if batch.overwrite {
+            ConflictPolicy::Overwrite
+        } else {
+            ConflictPolicy::Fail
+        };
+
+        let mut saved = 0usize;
+        let mut skipped = 0usize;
+        let mut failed = 0usize;
+        let mut records: Vec<Artifact> = Vec::new();
+        let model = self
+            .active_session
+            .as_ref()
+            .map(|session| session.model.clone());
+
+        for item in &batch.items {
+            match save_artifact(&batch.root, &item.relative, &item.content, policy) {
+                Ok(SaveOutcome::Written(path)) | Ok(SaveOutcome::Renamed(path)) => {
+                    saved += 1;
+                    let relative = relative_to(&batch.root, &path);
+                    let name = path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().to_string())
+                        .unwrap_or_else(|| relative.clone());
+                    records.push(Artifact::new(
+                        &batch.session_id,
+                        name,
+                        relative,
+                        path.to_string_lossy().to_string(),
+                        item.language.clone(),
+                        &item.content,
+                        model.clone(),
+                    ));
+                }
+                Ok(SaveOutcome::Exists(_)) => skipped += 1,
+                Err(error) => {
+                    failed += 1;
+                    tracing::warn!("no se pudo guardar {}: {error}", item.relative);
+                }
+            }
+        }
+
+        if let Some(storage) = &self.storage {
+            for artifact in &records {
+                if let Err(error) = storage.add_artifact(artifact) {
+                    tracing::warn!("no se pudo registrar el artefacto: {error}");
+                }
+            }
+        }
+        self.artifacts.extend(records);
+
+        self.status = format!(
+            "Descarga por lote: {saved} guardados, {skipped} ya existían, {failed} con error."
+        );
+    }
+
+    /// Abre la carpeta que contiene un archivo con el explorador del sistema.
+    fn open_location(path: &Path) {
+        let directory = path.parent().unwrap_or(path);
+        let command = if cfg!(target_os = "macos") {
+            "open"
+        } else if cfg!(target_os = "windows") {
+            "explorer"
+        } else {
+            "xdg-open"
+        };
+        if let Err(error) = std::process::Command::new(command).arg(directory).spawn() {
+            tracing::warn!("no se pudo abrir {}: {error}", directory.display());
+        }
+    }
+
+    fn toggle_artifact_archived(&mut self, id: &str, archived: bool) {
+        if let Some(storage) = &self.storage {
+            let _ = storage.set_artifact_archived(id, archived);
+        }
+        if let Some(artifact) = self.artifacts.iter_mut().find(|artifact| artifact.id == id) {
+            artifact.archived = archived;
+        }
+    }
+
+    fn delete_artifact(&mut self, id: &str) {
+        if let Some(storage) = &self.storage {
+            let _ = storage.delete_artifact(id);
+        }
+        self.artifacts.retain(|artifact| artifact.id != id);
+        self.status = "Registro eliminado (el archivo en disco no se toca).".to_string();
+    }
+
+    /// Exporta el árbol de artefactos como lista de texto (HU-22).
+    fn export_tree(&mut self) {
+        let artifacts = self.artifact_scope_list();
+        if artifacts.is_empty() {
+            self.status = "No hay artefactos que exportar.".to_string();
+            return;
+        }
+
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Exportar lista de artefactos")
+            .set_file_name("artefactos.txt");
+        if let Some(directory) = &self.last_download_dir {
+            dialog = dialog.set_directory(directory);
+        }
+        let Some(path) = dialog.save_file() else {
+            return;
+        };
+
+        let mut content = String::from("# Artefactos generados por Raggy\n");
+        for artifact in &artifacts {
+            content.push_str(&format!(
+                "{}  ({} · {})\n",
+                artifact.relative_path,
+                artifact.language.clone().unwrap_or_else(|| "?".to_string()),
+                short_timestamp(&artifact.created_at)
+            ));
+        }
+
+        match std::fs::write(&path, content) {
+            Ok(()) => self.status = format!("Lista exportada a {}.", path.display()),
+            Err(error) => self.status = format!("No se pudo exportar: {error}"),
         }
     }
 
@@ -960,7 +1328,7 @@ impl RaggyApp {
             ui.horizontal(|ui| {
                 ui.heading(APP_NAME);
                 ui.separator();
-                ui.label(format!("v{APP_VERSION} · Fase 4"));
+                ui.label(format!("v{APP_VERSION} · Fase 5"));
                 ui.separator();
                 if ui.button("Añadir carpeta").clicked() {
                     actions.add = true;
@@ -973,6 +1341,9 @@ impl RaggyApp {
                 }
                 if ui.button("Claves de API").clicked() {
                     actions.keys = true;
+                }
+                if ui.button("Artefactos").clicked() {
+                    actions.artifacts = true;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(format!("Datos: {}", data_dir.display()));
@@ -1321,8 +1692,16 @@ impl RaggyApp {
                     actions.push(CentralAction::OpenKeys);
                 }
             }
+
+            ui.separator();
+            if ui.button("Artefactos").clicked() {
+                self.artifacts_open = true;
+            }
         });
         ui.separator();
+
+        let mut pending_edits: Vec<(String, String)> = Vec::new();
+        let mut pending_previews: Vec<String> = Vec::new();
 
         egui::ScrollArea::vertical()
             .id_salt("chat_messages")
@@ -1354,6 +1733,20 @@ impl RaggyApp {
                             }
                         });
                     }
+
+                    if !is_user {
+                        render_code_blocks(
+                            ui,
+                            &message.id,
+                            &message.content,
+                            &self.code_edits,
+                            &self.previews,
+                            &mut pending_edits,
+                            &mut pending_previews,
+                            &mut actions,
+                        );
+                    }
+
                     ui.separator();
                 }
 
@@ -1363,6 +1756,14 @@ impl RaggyApp {
                     ui.small("generando…");
                 }
             });
+
+        for (key, name) in pending_edits {
+            self.code_edits.insert(key, name);
+        }
+        for key in pending_previews {
+            let entry = self.previews.entry(key).or_insert(false);
+            *entry = !*entry;
+        }
 
         ui.separator();
         let mut input = std::mem::take(&mut self.chat_input);
@@ -1575,6 +1976,233 @@ impl RaggyApp {
         }
     }
 
+    fn artifacts_window(&mut self, ctx: &egui::Context) {
+        if !self.artifacts_open {
+            return;
+        }
+
+        let mut open = true;
+        let mut actions: Vec<ArtifactAction> = Vec::new();
+        let mut scope_change: Option<ArtifactScope> = None;
+        let mut export = false;
+        let artifacts = self.artifact_scope_list();
+        let scope = self.artifact_scope;
+
+        egui::Window::new("Artefactos generados")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_width(760.0)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Ámbito:");
+                    if ui
+                        .selectable_label(scope == ArtifactScope::Session, "Sesión actual")
+                        .clicked()
+                    {
+                        scope_change = Some(ArtifactScope::Session);
+                    }
+                    if ui
+                        .selectable_label(scope == ArtifactScope::Folder, "Toda la carpeta")
+                        .clicked()
+                    {
+                        scope_change = Some(ArtifactScope::Folder);
+                    }
+                    ui.separator();
+                    if ui.button("Exportar lista").clicked() {
+                        export = true;
+                    }
+                });
+                ui.separator();
+
+                if artifacts.is_empty() {
+                    ui.label("Aún no has descargado código en este ámbito.");
+                    return;
+                }
+
+                ui.small("Árbol de archivos generados (por ruta):");
+                ui.add_space(4.0);
+
+                egui::ScrollArea::vertical()
+                    .id_salt("artifacts_tree")
+                    .max_height(420.0)
+                    .show(ui, |ui| {
+                        let mut last_directory = String::new();
+
+                        for artifact in &artifacts {
+                            let directory = artifact
+                                .relative_path
+                                .rsplit_once('/')
+                                .map(|(directory, _)| directory.to_string())
+                                .unwrap_or_default();
+                            if directory != last_directory {
+                                if directory.is_empty() {
+                                    ui.strong("(raíz)");
+                                } else {
+                                    ui.strong(format!("{directory}/"));
+                                }
+                                last_directory = directory;
+                            }
+
+                            let depth = artifact.relative_path.matches('/').count();
+                            ui.horizontal(|ui| {
+                                ui.add_space(depth as f32 * 16.0 + 16.0);
+                                let name = artifact
+                                    .relative_path
+                                    .rsplit('/')
+                                    .next()
+                                    .unwrap_or(&artifact.relative_path);
+                                ui.monospace(name);
+                                if artifact.archived {
+                                    ui.small("(archivado)");
+                                }
+                                ui.small(artifact.language.clone().unwrap_or_default());
+                                ui.small(short_timestamp(&artifact.created_at));
+                                if ui.small_button("Abrir ubicación").clicked() {
+                                    actions
+                                        .push(ArtifactAction::Open(PathBuf::from(&artifact.path)));
+                                }
+                                if ui
+                                    .small_button(if artifact.archived {
+                                        "Restaurar"
+                                    } else {
+                                        "Archivar"
+                                    })
+                                    .clicked()
+                                {
+                                    actions.push(ArtifactAction::Archive(
+                                        artifact.id.clone(),
+                                        !artifact.archived,
+                                    ));
+                                }
+                                if ui.small_button("Eliminar registro").clicked() {
+                                    actions.push(ArtifactAction::Delete(artifact.id.clone()));
+                                }
+                            });
+                        }
+                    });
+            });
+
+        if let Some(scope) = scope_change {
+            self.artifact_scope = scope;
+        }
+        if export {
+            self.export_tree();
+        }
+        for action in actions {
+            match action {
+                ArtifactAction::Open(path) => Self::open_location(&path),
+                ArtifactAction::Archive(id, archived) => {
+                    self.toggle_artifact_archived(&id, archived)
+                }
+                ArtifactAction::Delete(id) => self.delete_artifact(&id),
+            }
+        }
+        if !open {
+            self.artifacts_open = false;
+        }
+    }
+
+    fn batch_dialog(&mut self, ctx: &egui::Context) {
+        let Some(batch) = self.batch.as_mut() else {
+            return;
+        };
+
+        let mut confirm = false;
+        let mut cancel = false;
+        let items: Vec<(String, Option<String>)> = batch
+            .items
+            .iter()
+            .map(|item| (item.relative.clone(), item.language.clone()))
+            .collect();
+        let root = batch.root.clone();
+        let mut overwrite = batch.overwrite;
+
+        egui::Window::new("Descargar todo")
+            .collapsible(false)
+            .resizable(true)
+            .default_width(560.0)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label(format!("Destino: {}", root.display()));
+                ui.add_space(6.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("batch_items")
+                    .max_height(280.0)
+                    .show(ui, |ui| {
+                        for (relative, language) in &items {
+                            ui.horizontal(|ui| {
+                                ui.monospace(relative);
+                                if let Some(language) = language {
+                                    ui.small(language.clone());
+                                }
+                            });
+                        }
+                    });
+                ui.add_space(6.0);
+                ui.checkbox(&mut overwrite, "Sobrescribir los archivos que ya existan");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Cancelar").clicked() {
+                        cancel = true;
+                    }
+                    if ui
+                        .button(format!("Guardar {} archivos", items.len()))
+                        .clicked()
+                    {
+                        confirm = true;
+                    }
+                });
+            });
+
+        if let Some(batch) = self.batch.as_mut() {
+            batch.overwrite = overwrite;
+        }
+
+        if confirm {
+            self.confirm_batch();
+        } else if cancel {
+            self.batch = None;
+        }
+    }
+
+    fn conflict_dialog(&mut self, ctx: &egui::Context) {
+        let Some(pending) = self.pending_download.as_ref() else {
+            return;
+        };
+
+        let name = pending.name.clone();
+        let root = pending.root.clone();
+        let mut resolution: Option<ConflictPolicy> = None;
+
+        egui::Window::new("El archivo ya existe")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label(format!("«{name}» ya existe en {}", root.display()));
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Cancelar").clicked() {
+                        resolution = Some(ConflictPolicy::Fail);
+                    }
+                    if ui.button("Renombrar").clicked() {
+                        resolution = Some(ConflictPolicy::Rename);
+                    }
+                    if ui.button("Sobrescribir").clicked() {
+                        resolution = Some(ConflictPolicy::Overwrite);
+                    }
+                });
+            });
+
+        match resolution {
+            Some(ConflictPolicy::Fail) => self.pending_download = None,
+            Some(policy) => self.resolve_conflict(policy),
+            None => {}
+        }
+    }
+
     fn keys_window(&mut self, ctx: &egui::Context) {
         if !self.keys_open {
             return;
@@ -1764,6 +2392,11 @@ impl RaggyApp {
             self.refresh_keys();
             self.keys_open = true;
         }
+        if actions.artifacts {
+            self.refresh_artifacts();
+            self.artifact_scope = ArtifactScope::Session;
+            self.artifacts_open = true;
+        }
 
         let sidebar = Self::sidebar(
             ui,
@@ -1830,6 +2463,15 @@ impl RaggyApp {
                     self.refresh_keys();
                     self.keys_open = true;
                 }
+                CentralAction::CopyCode(text) => {
+                    ui.ctx().copy_text(text);
+                    self.status = "Código copiado al portapapeles.".to_string();
+                }
+                CentralAction::DownloadBlock {
+                    message_id,
+                    block_index,
+                } => self.download_block(message_id, block_index),
+                CentralAction::DownloadAll { message_id } => self.start_download_all(message_id),
             }
         }
     }
@@ -1890,6 +2532,9 @@ impl eframe::App for RaggyApp {
         self.session_dialog_window(&ctx);
         self.settings_window(&ctx);
         self.keys_window(&ctx);
+        self.artifacts_window(&ctx);
+        self.batch_dialog(&ctx);
+        self.conflict_dialog(&ctx);
     }
 
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {
@@ -1938,9 +2583,381 @@ fn key_status_text(status: Option<&KeyStatus>) -> String {
     }
 }
 
+/// Dibuja los bloques de código de un mensaje con nombre editable y acciones.
+#[allow(clippy::too_many_arguments)]
+fn render_code_blocks(
+    ui: &mut egui::Ui,
+    message_id: &str,
+    content: &str,
+    edits: &HashMap<String, String>,
+    previews: &HashMap<String, bool>,
+    pending_edits: &mut Vec<(String, String)>,
+    pending_previews: &mut Vec<String>,
+    actions: &mut Vec<CentralAction>,
+) {
+    let blocks = extract_code_blocks(content);
+    if blocks.is_empty() {
+        return;
+    }
+
+    ui.horizontal(|ui| {
+        ui.small(format!("{} bloque(s) de código", blocks.len()));
+        if blocks.len() > 1
+            && ui
+                .small_button(format!("Descargar todo ({})", blocks.len()))
+                .clicked()
+        {
+            actions.push(CentralAction::DownloadAll {
+                message_id: message_id.to_string(),
+            });
+        }
+    });
+
+    for (index, block) in blocks.iter().enumerate() {
+        let key = format!("{message_id}:{index}");
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.label("Archivo:");
+                let mut name = edits.get(&key).cloned().unwrap_or_else(|| {
+                    block
+                        .filename
+                        .clone()
+                        .unwrap_or_else(|| suggest_filename(block.language.as_deref(), index))
+                });
+                if ui
+                    .add(egui::TextEdit::singleline(&mut name).desired_width(240.0))
+                    .changed()
+                {
+                    pending_edits.push((key.clone(), name.clone()));
+                }
+                if let Some(language) = &block.language {
+                    ui.small(language.clone());
+                }
+                if ui.small_button("Vista previa").clicked() {
+                    pending_previews.push(key.clone());
+                }
+                if ui.small_button("Copiar").clicked() {
+                    actions.push(CentralAction::CopyCode(block.content.clone()));
+                }
+                if ui.small_button("Descargar").clicked() {
+                    actions.push(CentralAction::DownloadBlock {
+                        message_id: message_id.to_string(),
+                        block_index: index,
+                    });
+                }
+            });
+
+            if previews.get(&key).copied().unwrap_or(false) {
+                egui::ScrollArea::both()
+                    .id_salt(format!("preview_{key}"))
+                    .max_height(360.0)
+                    .show(ui, |ui| {
+                        ui.add(egui::Label::new(highlight_job(
+                            ui,
+                            block.language.as_deref(),
+                            &block.content,
+                        )));
+                    });
+            } else {
+                ui.small(format!(
+                    "Líneas {} · {} caracteres",
+                    block.start_line,
+                    block.content.chars().count()
+                ));
+            }
+        });
+        ui.add_space(4.0);
+    }
+}
+
+/// Categoría de un token para el resaltado de sintaxis.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TokenKind {
+    Plain,
+    Keyword,
+    Str,
+    Comment,
+    Number,
+}
+
+struct Token {
+    text: String,
+    kind: TokenKind,
+}
+
+/// Construye el texto resaltado de un bloque de código (HU-18).
+fn highlight_job(ui: &egui::Ui, language: Option<&str>, code: &str) -> egui::text::LayoutJob {
+    let font = egui::FontId::monospace(13.0);
+    let base = ui.visuals().text_color();
+    let mut job = egui::text::LayoutJob::default();
+
+    let width = ui.available_width();
+    job.wrap.max_width = if width.is_finite() && width > 0.0 {
+        width
+    } else {
+        900.0
+    };
+
+    for token in tokenize_code(language, code) {
+        let color = match token.kind {
+            TokenKind::Plain => base,
+            TokenKind::Keyword => egui::Color32::from_rgb(86, 156, 214),
+            TokenKind::Str => egui::Color32::from_rgb(206, 145, 120),
+            TokenKind::Comment => egui::Color32::from_rgb(120, 150, 110),
+            TokenKind::Number => egui::Color32::from_rgb(181, 206, 168),
+        };
+        job.append(
+            &token.text,
+            0.0,
+            egui::TextFormat {
+                font_id: font.clone(),
+                color,
+                ..Default::default()
+            },
+        );
+    }
+
+    job
+}
+
+/// Palabras reservadas reconocidas por el resaltado (varios lenguajes).
+const KEYWORDS: &[&str] = &[
+    "fn",
+    "let",
+    "mut",
+    "pub",
+    "struct",
+    "enum",
+    "impl",
+    "trait",
+    "mod",
+    "use",
+    "crate",
+    "self",
+    "super",
+    "match",
+    "loop",
+    "while",
+    "for",
+    "in",
+    "if",
+    "else",
+    "return",
+    "break",
+    "continue",
+    "async",
+    "await",
+    "move",
+    "ref",
+    "where",
+    "dyn",
+    "unsafe",
+    "const",
+    "static",
+    "type",
+    "def",
+    "class",
+    "import",
+    "from",
+    "as",
+    "with",
+    "lambda",
+    "pass",
+    "raise",
+    "try",
+    "except",
+    "finally",
+    "yield",
+    "global",
+    "nonlocal",
+    "assert",
+    "del",
+    "elif",
+    "not",
+    "and",
+    "or",
+    "is",
+    "None",
+    "True",
+    "False",
+    "function",
+    "var",
+    "new",
+    "this",
+    "typeof",
+    "instanceof",
+    "export",
+    "default",
+    "extends",
+    "package",
+    "interface",
+    "public",
+    "private",
+    "protected",
+    "void",
+    "int",
+    "float",
+    "double",
+    "bool",
+    "string",
+    "char",
+    "null",
+    "nil",
+    "true",
+    "false",
+    "func",
+    "defer",
+    "go",
+    "chan",
+    "map",
+    "range",
+    "select",
+    "interface",
+    "namespace",
+    "using",
+    "foreach",
+    "throws",
+    "catch",
+    "switch",
+    "case",
+    "do",
+    "then",
+    "end",
+    "begin",
+    "SELECT",
+    "FROM",
+    "WHERE",
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "CREATE",
+    "TABLE",
+    "JOIN",
+    "GROUP",
+    "ORDER",
+    "BY",
+];
+
+fn is_keyword(word: &str) -> bool {
+    KEYWORDS.contains(&word)
+}
+
+/// Marcador de comentario de línea según el lenguaje.
+fn line_comment_marker(language: Option<&str>) -> Vec<char> {
+    match language.map(str::to_ascii_lowercase).as_deref() {
+        Some("python") | Some("py") | Some("bash") | Some("sh") | Some("shell") | Some("zsh")
+        | Some("yaml") | Some("yml") | Some("toml") | Some("ruby") | Some("rb") | Some("perl")
+        | Some("pl") | Some("r") | Some("makefile") | Some("dockerfile") => vec!['#'],
+        Some("sql") | Some("lua") | Some("haskell") => vec!['-', '-'],
+        _ => vec!['/', '/'],
+    }
+}
+
+/// Tokeniza un fragmento de código para el resaltado (HU-18).
+fn tokenize_code(language: Option<&str>, code: &str) -> Vec<Token> {
+    let marker = line_comment_marker(language);
+    let chars: Vec<char> = code.chars().collect();
+    let mut tokens = Vec::new();
+    let mut plain = String::new();
+    let mut index = 0;
+
+    while index < chars.len() {
+        let current = chars[index];
+
+        if current == marker[0] && chars[index..].starts_with(&marker[..]) {
+            push_plain(&mut tokens, &mut plain);
+            let start = index;
+            while index < chars.len() && chars[index] != '\n' {
+                index += 1;
+            }
+            tokens.push(Token {
+                text: chars[start..index].iter().collect(),
+                kind: TokenKind::Comment,
+            });
+            continue;
+        }
+
+        if current == '"' || current == '\'' || current == '`' {
+            push_plain(&mut tokens, &mut plain);
+            let quote = current;
+            let start = index;
+            index += 1;
+            while index < chars.len() {
+                if chars[index] == '\\' {
+                    index += 2;
+                    continue;
+                }
+                if chars[index] == quote {
+                    index += 1;
+                    break;
+                }
+                if chars[index] == '\n' {
+                    break;
+                }
+                index += 1;
+            }
+            tokens.push(Token {
+                text: chars[start..index.min(chars.len())].iter().collect(),
+                kind: TokenKind::Str,
+            });
+            continue;
+        }
+
+        if current.is_ascii_digit() {
+            push_plain(&mut tokens, &mut plain);
+            let start = index;
+            while index < chars.len()
+                && (chars[index].is_ascii_alphanumeric()
+                    || chars[index] == '.'
+                    || chars[index] == '_')
+            {
+                index += 1;
+            }
+            tokens.push(Token {
+                text: chars[start..index].iter().collect(),
+                kind: TokenKind::Number,
+            });
+            continue;
+        }
+
+        if current.is_alphabetic() || current == '_' {
+            let start = index;
+            while index < chars.len() && (chars[index].is_alphanumeric() || chars[index] == '_') {
+                index += 1;
+            }
+            let word: String = chars[start..index].iter().collect();
+            if is_keyword(&word) {
+                push_plain(&mut tokens, &mut plain);
+                tokens.push(Token {
+                    text: word,
+                    kind: TokenKind::Keyword,
+                });
+            } else {
+                plain.push_str(&word);
+            }
+            continue;
+        }
+
+        plain.push(current);
+        index += 1;
+    }
+
+    push_plain(&mut tokens, &mut plain);
+    tokens
+}
+
+fn push_plain(tokens: &mut Vec<Token>, plain: &mut String) {
+    if !plain.is_empty() {
+        tokens.push(Token {
+            text: std::mem::take(plain),
+            kind: TokenKind::Plain,
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{short_timestamp, snippet};
+    use super::{short_timestamp, snippet, tokenize_code, TokenKind};
 
     #[test]
     fn abrevia_marcas_de_tiempo() {
@@ -1955,5 +2972,32 @@ mod tests {
     fn recorta_el_extracto_a_la_primera_linea() {
         assert_eq!(snippet("\n\n  hola mundo  \nresto"), "hola mundo");
         assert_eq!(snippet("   "), "");
+    }
+
+    #[test]
+    fn resalta_palabras_reservadas_cadenas_y_comentarios() {
+        let tokens = tokenize_code(Some("rust"), "let x = \"hola\"; // nota");
+        assert!(tokens
+            .iter()
+            .any(|token| token.kind == TokenKind::Keyword && token.text == "let"));
+        assert!(tokens
+            .iter()
+            .any(|token| token.kind == TokenKind::Str && token.text == "\"hola\""));
+        assert!(tokens
+            .iter()
+            .any(|token| token.kind == TokenKind::Comment && token.text.contains("nota")));
+    }
+
+    #[test]
+    fn usa_el_comentario_correcto_segun_el_lenguaje() {
+        let python = tokenize_code(Some("python"), "# comentario\nprint(1)");
+        assert!(python
+            .iter()
+            .any(|token| token.kind == TokenKind::Comment && token.text.starts_with("#")));
+
+        let sql = tokenize_code(Some("sql"), "SELECT 1 -- nota");
+        assert!(sql
+            .iter()
+            .any(|token| token.kind == TokenKind::Comment && token.text.starts_with("--")));
     }
 }

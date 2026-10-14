@@ -5,7 +5,7 @@ use rusqlite::{params, OptionalExtension, Row};
 use raggy_rag::Chunk;
 
 use crate::error::Result;
-use crate::models::{Document, Folder, FolderStatus, Message, Session};
+use crate::models::{Artifact, Document, Folder, FolderStatus, Message, Session};
 use crate::Storage;
 
 impl Storage {
@@ -418,6 +418,86 @@ impl Storage {
         let rows = stmt.query_map([session_id], row_to_message)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
+
+    // -------------------------------------------------------------- artefactos
+
+    /// Registra un artefacto generado (HU-20).
+    pub fn add_artifact(&self, artifact: &Artifact) -> Result<()> {
+        self.connection().execute(
+            "INSERT INTO artifacts
+                 (id, session_id, name, relative_path, path, language, content, model, archived, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                artifact.id,
+                artifact.session_id,
+                artifact.name,
+                artifact.relative_path,
+                artifact.path,
+                artifact.language,
+                artifact.content,
+                artifact.model,
+                artifact.archived as i64,
+                artifact.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Lista los artefactos de una sesión (HU-20).
+    pub fn list_artifacts_by_session(&self, session_id: &str) -> Result<Vec<Artifact>> {
+        let mut stmt = self.connection().prepare(
+            "SELECT id, session_id, name, relative_path, path, language, content, model,
+                    archived, created_at
+             FROM artifacts WHERE session_id = ?1 ORDER BY relative_path ASC, created_at ASC",
+        )?;
+        let rows = stmt.query_map([session_id], row_to_artifact)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Lista los artefactos de todas las sesiones de una carpeta (HU-20, HU-22).
+    pub fn list_artifacts_by_folder(&self, folder_id: &str) -> Result<Vec<Artifact>> {
+        let mut stmt = self.connection().prepare(
+            "SELECT a.id, a.session_id, a.name, a.relative_path, a.path, a.language, a.content,
+                    a.model, a.archived, a.created_at
+             FROM artifacts a
+             JOIN sessions s ON s.id = a.session_id
+             WHERE s.folder_id = ?1
+             ORDER BY a.relative_path ASC, a.created_at ASC",
+        )?;
+        let rows = stmt.query_map([folder_id], row_to_artifact)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Marca o desmarca un artefacto como archivado.
+    pub fn set_artifact_archived(&self, id: &str, archived: bool) -> Result<()> {
+        self.connection().execute(
+            "UPDATE artifacts SET archived = ?2 WHERE id = ?1",
+            params![id, archived as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Elimina el registro de un artefacto (sin borrar el archivo físico).
+    pub fn delete_artifact(&self, id: &str) -> Result<()> {
+        self.connection()
+            .execute("DELETE FROM artifacts WHERE id = ?1", [id])?;
+        Ok(())
+    }
+}
+
+fn row_to_artifact(row: &Row<'_>) -> rusqlite::Result<Artifact> {
+    Ok(Artifact {
+        id: row.get(0)?,
+        session_id: row.get(1)?,
+        name: row.get(2)?,
+        relative_path: row.get(3)?,
+        path: row.get(4)?,
+        language: row.get(5)?,
+        content: row.get(6)?,
+        model: row.get(7)?,
+        archived: row.get::<_, i64>(8)? != 0,
+        created_at: row.get(9)?,
+    })
 }
 
 fn row_to_folder(row: &Row<'_>) -> rusqlite::Result<Folder> {

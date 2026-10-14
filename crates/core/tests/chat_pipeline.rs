@@ -85,7 +85,7 @@ fn el_prompt_incluye_la_instruccion_estricta_y_la_cita() {
     let (blocks, citations) = context_from_retrieved(&chunks);
     assert!(!citations.is_empty());
 
-    let request = compose_request("mock", 0.1, 256, &blocks, &[], "¿Cómo compilar?");
+    let request = compose_request("mock", 0.1, 256, &blocks, &[], &[], "¿Cómo compilar?");
     assert_eq!(request.messages[0].role, Role::System);
     assert!(request.messages[0].content.contains(STRICT_SYSTEM_PROMPT));
     assert!(request
@@ -176,6 +176,7 @@ fn el_chat_transmite_y_persiste_la_respuesta_con_citas() {
         0.1,
         256,
         &blocks,
+        &[],
         &[],
         "¿Cómo instalo la aplicación?",
     );

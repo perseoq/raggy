@@ -46,10 +46,15 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "proveedor de respaldo por sesión",
         sql: include_str!("../migrations/0005_session_fallback.sql"),
     },
+    Migration {
+        version: 6,
+        description: "memoria de proyecto: contenido y jerarquía de artefactos",
+        sql: include_str!("../migrations/0006_artifact_memory.sql"),
+    },
 ];
 
 /// Versión de esquema que espera este binario.
-pub const LATEST_SCHEMA_VERSION: i64 = 5;
+pub const LATEST_SCHEMA_VERSION: i64 = 6;
 
 /// Aplica todas las migraciones pendientes dentro de una transacción.
 pub fn apply(conn: &mut Connection) -> Result<i64> {

@@ -4,6 +4,7 @@
 //! aplicación, localización de directorios de datos y el modelo de errores.
 //! No depende de la interfaz gráfica ni de ningún proveedor de LLM.
 
+pub mod artifacts;
 pub mod chat;
 pub mod config;
 pub mod error;
@@ -13,6 +14,10 @@ pub mod search;
 pub mod secrets;
 pub mod watch;
 
+pub use artifacts::{
+    artifacts_for_prompt, free_path, relative_to, sanitize_relative, save_artifact, ConflictPolicy,
+    SaveOutcome,
+};
 pub use chat::{
     compose_request, context_from_retrieved, ChatCommand, ChatEvent, ChatWorker, ProviderFactory,
 };

@@ -5,10 +5,10 @@ a documentación Markdown local**. Indexas una carpeta, creas sesiones aisladas
 por carpeta y chateas con distintos proveedores de LLM (OpenAI, Anthropic,
 DeepSeek, OpenRouter), generando y descargando código trazable.
 
-> Estado: **Fase 4 completada** — las API Keys se guardan cifradas en el llavero
-> del sistema, se pueden probar las conexiones y cada sesión admite un proveedor
-> de respaldo. Quedan la generación/descarga de código y la memoria de proyecto
-> (Fase 5).
+> Estado: **Fase 5 completada** — además del chat, las respuestas con código se
+> pueden previsualizar, copiar y descargar con su nombre declarado, y los
+> artefactos quedan registrados como memoria del proyecto. Quedan la
+> configuración avanzada, la seguridad y la exportación (Fase 6).
 
 ## Documentación
 
@@ -27,7 +27,7 @@ DeepSeek, OpenRouter), generando y descargando código trazable.
 | 2 | Motor RAG: embeddings, índice vectorial y recuperación | ✅ |
 | 3 | Chat y sesiones por carpeta | ✅ |
 | 4 | Multi-proveedor: claves, prueba de conexión y fallback | ✅ |
-| 5 | Generación y descarga de código, memoria de proyecto | pendiente |
+| 5 | Generación y descarga de código, memoria de proyecto | ✅ |
 | 6 | Configuración avanzada, seguridad, exportación y pulido | pendiente |
 
 ### Fase 0 — cimientos
@@ -121,6 +121,29 @@ DeepSeek, OpenRouter), generando y descargando código trazable.
 > Nota sobre el almacén: en Linux el llavero debe estar desbloqueado (GNOME
 > Keyring o KWallet). Si no está disponible, la aplicación lo indica y sigue
 > funcionando con las variables de entorno.
+
+### Fase 5 — generación, descarga de código y memoria (HU-16 a HU-22)
+
+- **Detección de bloques de código** (HU-16): se reconocen los bloques cercados
+  con ``` o ~~~ y se deduce el nombre declarado en la línea de apertura
+  (`title="x.py"`, `file=x.py`, `python:x.py`) o en el texto inmediatamente
+  anterior; si no hay nombre, se propone uno genérico **editable**.
+- **Vista previa** (HU-18) con resaltado de sintaxis propio (palabras clave,
+  cadenas, comentarios y números), copia al portapapeles y nombre propuesto.
+- **Descarga con el nombre correcto** (HU-17): se elige la carpeta destino, se
+  respeta la extensión y, si el archivo ya existe, se avisa y se ofrece
+  **sobrescribir** o **renombrar**. Las rutas declaradas se **sanean**: nunca se
+  escribe fuera de la carpeta elegida.
+- **Descarga por lote** (HU-19): un botón guarda todos los bloques de una
+  respuesta respetando sus rutas relativas, con opción de sobrescribir y un
+  resumen de archivos guardados.
+- **Memoria de proyecto** (HU-20, HU-22): cada descarga se registra con nombre,
+  ruta, fecha, sesión y modelo; la vista **Artefactos** muestra el árbol de
+  archivos por ruta, permite abrir la ubicación, archivar o eliminar el registro
+  (sin borrar el archivo) y **exportar la lista**.
+- **Continuidad entre turnos** (HU-21): el prompt incluye el manifiesto de los
+  artefactos de la sesión y, cuando el usuario menciona uno, también su
+  contenido, para que el modelo lo modifique sin duplicarlo.
 
 ## Estructura del proyecto
 

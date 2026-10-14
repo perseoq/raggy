@@ -32,6 +32,10 @@ pub enum CoreError {
         message: String,
     },
 
+    /// Error al guardar un artefacto generado.
+    #[error("no se pudo guardar el artefacto: {0}")]
+    Artifact(String),
+
     /// Error procedente de la capa de persistencia.
     #[error(transparent)]
     Storage(#[from] raggy_storage::StorageError),
