@@ -10,6 +10,7 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
+raggy-docs.workspace = true
 raggy-llm.workspace = true
 raggy-rag.workspace = true
 raggy-storage.workspace = true

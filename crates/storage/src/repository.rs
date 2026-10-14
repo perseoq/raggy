@@ -181,9 +181,9 @@ impl Storage {
         {
             let mut stmt = tx.prepare(
                 "INSERT INTO chunks
-                     (id, folder_id, source_path, source_file, heading, start_line, end_line,
-                      content_hash, content, embedding)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                     (id, folder_id, source_path, source_file, heading, location, start_line,
+                      end_line, content_hash, content, embedding)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             )?;
             for (chunk, embedding) in chunks.iter().zip(embeddings) {
                 stmt.execute(params![
@@ -192,6 +192,7 @@ impl Storage {
                     source_path,
                     chunk.metadata.source_file,
                     chunk.metadata.heading,
+                    chunk.metadata.location,
                     chunk.metadata.start_line as i64,
                     chunk.metadata.end_line as i64,
                     chunk.content_hash,
@@ -242,23 +243,24 @@ impl Storage {
     /// Recupera todos los chunks de una carpeta con su embedding (si lo hay).
     pub fn list_embedded_chunks(&self, folder_id: &str) -> Result<Vec<(Chunk, Option<Vec<f32>>)>> {
         let mut stmt = self.connection().prepare(
-            "SELECT id, source_path, source_file, heading, start_line, end_line,
+            "SELECT id, source_path, source_file, heading, location, start_line, end_line,
                     content_hash, content, embedding
              FROM chunks WHERE folder_id = ?1 ORDER BY source_path ASC, start_line ASC",
         )?;
         let rows = stmt.query_map([folder_id], |row| {
-            let blob: Option<Vec<u8>> = row.get(8)?;
+            let blob: Option<Vec<u8>> = row.get(9)?;
             Ok((
                 Chunk {
                     id: row.get(0)?,
-                    content_hash: row.get(6)?,
-                    content: row.get(7)?,
+                    content_hash: row.get(7)?,
+                    content: row.get(8)?,
                     metadata: raggy_rag::ChunkMetadata {
                         source_path: row.get(1)?,
                         source_file: row.get(2)?,
                         heading: row.get(3)?,
-                        start_line: row.get::<_, i64>(4)? as usize,
-                        end_line: row.get::<_, i64>(5)? as usize,
+                        location: row.get(4)?,
+                        start_line: row.get::<_, i64>(5)? as usize,
+                        end_line: row.get::<_, i64>(6)? as usize,
                     },
                 },
                 blob.map(decode_vector),
@@ -270,20 +272,22 @@ impl Storage {
     /// Recupera los chunks de un archivo concreto, ordenados por posición.
     pub fn list_chunks_for_path(&self, folder_id: &str, source_path: &str) -> Result<Vec<Chunk>> {
         let mut stmt = self.connection().prepare(
-            "SELECT id, source_path, source_file, heading, start_line, end_line, content_hash, content
+            "SELECT id, source_path, source_file, heading, location, start_line, end_line,
+                    content_hash, content
              FROM chunks WHERE folder_id = ?1 AND source_path = ?2 ORDER BY start_line ASC",
         )?;
         let rows = stmt.query_map(params![folder_id, source_path], |row| {
             Ok(Chunk {
                 id: row.get(0)?,
-                content_hash: row.get(6)?,
-                content: row.get(7)?,
+                content_hash: row.get(7)?,
+                content: row.get(8)?,
                 metadata: raggy_rag::ChunkMetadata {
                     source_path: row.get(1)?,
                     source_file: row.get(2)?,
                     heading: row.get(3)?,
-                    start_line: row.get::<_, i64>(4)? as usize,
-                    end_line: row.get::<_, i64>(5)? as usize,
+                    location: row.get(4)?,
+                    start_line: row.get::<_, i64>(5)? as usize,
+                    end_line: row.get::<_, i64>(6)? as usize,
                 },
             })
         })?;

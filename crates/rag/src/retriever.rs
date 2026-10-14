@@ -18,6 +18,9 @@ pub struct Citation {
     pub source_path: String,
     /// Encabezado padre, si lo hay.
     pub heading: Option<String>,
+    /// Ubicación legible en el documento original (p. ej. `pág. 3`), si aplica.
+    #[serde(default)]
+    pub location: Option<String>,
     /// Primera línea citada (1-based).
     pub start_line: usize,
     /// Última línea citada (1-based).
@@ -33,15 +36,19 @@ impl Citation {
             source_file: chunk.metadata.source_file.clone(),
             source_path: chunk.metadata.source_path.clone(),
             heading: chunk.metadata.heading.clone(),
+            location: chunk.metadata.location.clone(),
             start_line: chunk.metadata.start_line,
             end_line: chunk.metadata.end_line,
             score,
         }
     }
 
-    /// Etiqueta legible, p. ej. `docs/guia.md:10-24`.
+    /// Etiqueta legible, p. ej. `docs/guia.md:10-24` o `datos.csv (filas 1-100)`.
     pub fn label(&self) -> String {
-        format!("{}:{}-{}", self.source_path, self.start_line, self.end_line)
+        match &self.location {
+            Some(location) => format!("{} ({location})", self.source_path),
+            None => format!("{}:{}-{}", self.source_path, self.start_line, self.end_line),
+        }
     }
 }
 
@@ -205,6 +212,7 @@ mod tests {
                 source_file: "doc.md".to_string(),
                 source_path: "docs/doc.md".to_string(),
                 heading: None,
+                location: None,
                 start_line: 1,
                 end_line: 1,
             },

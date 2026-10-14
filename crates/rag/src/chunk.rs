@@ -11,6 +11,11 @@ pub struct ChunkMetadata {
     pub source_path: String,
     /// Encabezado padre más cercano, si lo hay.
     pub heading: Option<String>,
+    /// Ubicación legible en el documento original (p. ej. `pág. 3`, `hoja Ventas`).
+    ///
+    /// Es `None` para Markdown y código, donde la cita usa las líneas.
+    #[serde(default)]
+    pub location: Option<String>,
     /// Primera línea incluida (1-based).
     pub start_line: usize,
     /// Última línea incluida (1-based).

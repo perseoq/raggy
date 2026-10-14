@@ -126,6 +126,7 @@ mod tests {
                 source_file: "guia.md".to_string(),
                 source_path: "docs/guia.md".to_string(),
                 heading: None,
+                location: None,
                 start_line: 3,
                 end_line: 9,
                 score: 0.8,

@@ -98,6 +98,7 @@ pub fn chunk_markdown(source: &ChunkSource<'_>, options: &ChunkingOptions) -> Ve
                     source_file: file_name(source.relative_path),
                     source_path: source.relative_path.to_string(),
                     heading: section.heading.clone(),
+                    location: None,
                     start_line: start + 1,
                     end_line: end,
                 },

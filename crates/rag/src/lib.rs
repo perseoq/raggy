@@ -13,6 +13,7 @@ pub mod chunk;
 pub mod embedding;
 pub mod markdown;
 pub mod retriever;
+pub mod section;
 pub mod text;
 pub mod vector;
 
@@ -23,4 +24,5 @@ pub use embedding::{
 };
 pub use markdown::MarkdownChunker;
 pub use retriever::{Citation, HybridRetriever, RetrievedChunk, Retriever, RetrieverOptions};
+pub use section::{chunk_sections, DocumentSection};
 pub use vector::VectorIndex;

@@ -12,8 +12,10 @@ use std::thread::{self, JoinHandle};
 
 use walkdir::WalkDir;
 
+use raggy_docs::ExtractOptions;
 use raggy_rag::{
-    ChunkSource, Chunker, ChunkingOptions, EmbeddingProvider, HashingEmbedding, MarkdownChunker,
+    chunk_sections, Chunk, ChunkSource, Chunker, ChunkingOptions, DocumentSection,
+    EmbeddingProvider, HashingEmbedding, MarkdownChunker,
 };
 use raggy_storage::{Document, Folder, FolderStatus, Storage};
 
@@ -89,7 +91,10 @@ pub fn is_indexable(path: &Path) -> bool {
     };
 
     let extension = extension.to_ascii_lowercase();
-    if matches!(extension.as_str(), "md" | "markdown" | "mdx" | "txt") {
+    if matches!(
+        extension.as_str(),
+        "md" | "markdown" | "mdx" | "txt" | "csv" | "docx" | "xlsx" | "xlsm" | "xlsb" | "xls"
+    ) {
         return true;
     }
     raggy_llm::is_code_extension(&extension)
@@ -109,11 +114,12 @@ pub fn scan_indexable_files(root: &Path) -> Vec<PathBuf> {
 
 /// Extensiones indexables, para los filtros de los diálogos.
 pub const INDEXABLE_EXTENSIONS: &[&str] = &[
-    "md", "markdown", "mdx", "txt", "py", "pyi", "rs", "c", "h", "cc", "cpp", "cxx", "hpp", "hh",
-    "cs", "go", "java", "kt", "kts", "js", "mjs", "jsx", "ts", "tsx", "rb", "php", "swift", "m",
-    "mm", "scala", "lua", "pl", "r", "dart", "ex", "exs", "clj", "sh", "bash", "zsh", "ps1", "sql",
-    "json", "yaml", "yml", "toml", "xml", "html", "css", "scss", "vue", "svelte", "zig", "nim",
-    "jl", "groovy", "tf", "proto", "graphql", "ini", "cfg", "conf", "asm", "sol",
+    "md", "markdown", "mdx", "txt", "csv", "docx", "xlsx", "xlsm", "xlsb", "xls", "py", "pyi",
+    "rs", "c", "h", "cc", "cpp", "cxx", "hpp", "hh", "cs", "go", "java", "kt", "kts", "js", "mjs",
+    "jsx", "ts", "tsx", "rb", "php", "swift", "m", "mm", "scala", "lua", "pl", "r", "dart", "ex",
+    "exs", "clj", "sh", "bash", "zsh", "ps1", "sql", "json", "yaml", "yml", "toml", "xml", "html",
+    "css", "scss", "vue", "svelte", "zig", "nim", "jl", "groovy", "tf", "proto", "graphql", "ini",
+    "cfg", "conf", "asm", "sol",
 ];
 
 /// Indexa una carpeta de forma incremental.
@@ -172,8 +178,8 @@ pub fn index_folder(
             total,
         });
 
-        let content = match std::fs::read_to_string(path) {
-            Ok(content) => content,
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
             Err(error) => {
                 tracing::warn!(path = %path.display(), "archivo ilegible, se omite: {error}");
                 summary.files_failed += 1;
@@ -184,7 +190,9 @@ pub fn index_folder(
         let metadata = std::fs::metadata(path).ok();
         let size_bytes = metadata.as_ref().map_or(0, |m| m.len() as i64);
         let modified_at = metadata.as_ref().map_or(0, modified_millis);
-        let content_hash = blake3::hash(content.as_bytes()).to_hex().to_string();
+        // El hash se calcula sobre los bytes del archivo: así se puede saltar la
+        // extracción (y el OCR, en fases posteriores) si el documento no cambió.
+        let content_hash = blake3::hash(&bytes).to_hex().to_string();
 
         if existing
             .get(&relative)
@@ -194,11 +202,18 @@ pub fn index_folder(
             continue;
         }
 
-        let source = ChunkSource {
-            relative_path: &relative,
-            content: &content,
+        let chunks = match extract_chunks(path, &relative, &bytes, &chunker, options) {
+            Ok(chunks) => chunks,
+            Err(error) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    "no se pudo extraer el texto, se omite: {error}"
+                );
+                summary.files_failed += 1;
+                continue;
+            }
         };
-        let chunks = chunker.chunk(&source, &options.chunking);
+
         let embeddings: Vec<Vec<f32>> = chunks
             .iter()
             .map(|chunk| embedder.embed(&chunk.content).vector)
@@ -237,6 +252,59 @@ pub fn index_folder(
     });
 
     Ok(summary)
+}
+
+/// ¿El archivo se trocea con el chunker de Markdown (encabezados y bloques de
+/// código) en lugar del chunker de documentos extraídos?
+fn uses_markdown_chunker(path: &Path) -> bool {
+    match path.extension().and_then(|extension| extension.to_str()) {
+        Some(extension) => {
+            let extension = extension.to_ascii_lowercase();
+            matches!(extension.as_str(), "md" | "markdown" | "mdx")
+                || raggy_llm::is_code_extension(&extension)
+        }
+        None => false,
+    }
+}
+
+/// Obtiene los fragmentos de un archivo: Markdown y código pasan por el chunker
+/// semántico; el resto se extrae con `raggy-docs` y se trocea por secciones.
+fn extract_chunks(
+    path: &Path,
+    relative: &str,
+    bytes: &[u8],
+    chunker: &MarkdownChunker,
+    options: &IndexOptions,
+) -> Result<Vec<Chunk>> {
+    if uses_markdown_chunker(path) {
+        let content = String::from_utf8_lossy(bytes);
+        let source = ChunkSource {
+            relative_path: relative,
+            content: &content,
+        };
+        return Ok(chunker.chunk(&source, &options.chunking));
+    }
+
+    let document = raggy_docs::extract(path, &ExtractOptions::default()).map_err(|error| {
+        CoreError::Index {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        }
+    })?;
+
+    let sections: Vec<DocumentSection> = document
+        .sections
+        .iter()
+        .map(|section| {
+            DocumentSection::new(
+                section.heading.clone(),
+                Some(section.location.label()),
+                section.text.clone(),
+            )
+        })
+        .collect();
+
+    Ok(chunk_sections(relative, &sections, &options.chunking))
 }
 
 fn relative_path(root: &Path, path: &Path) -> String {
@@ -500,10 +568,48 @@ mod tests {
         assert!(is_indexable(Path::new("main.RS")));
         assert!(is_indexable(Path::new("lib.cpp")));
         assert!(is_indexable(Path::new("cabecera.h")));
+        assert!(is_indexable(Path::new("tabla.csv")));
+        assert!(is_indexable(Path::new("TABLA.CSV")));
+        assert!(is_indexable(Path::new("informe.docx")));
+        assert!(is_indexable(Path::new("libro.xlsx")));
+        assert!(is_indexable(Path::new("antiguo.xls")));
 
         assert!(!is_indexable(Path::new("foto.png")));
         assert!(!is_indexable(Path::new("video.mp4")));
+        assert!(!is_indexable(Path::new("informe.pdf")));
         assert!(!is_indexable(Path::new("binario")));
+    }
+
+    #[test]
+    fn indexa_csv_como_secciones_con_ubicacion() {
+        let dir = TemporalDir::new("csv");
+        dir.write("datos.csv", "nombre,edad\nAna,30\nLuis,25\n");
+
+        let mut storage = Storage::open_in_memory().expect("abre");
+        let folder = Folder::new(dir.path.to_string_lossy().to_string(), "datos");
+        storage.upsert_folder(&folder).expect("guarda");
+
+        let mut sin_progreso = |_| {};
+        let summary = index_folder(
+            &mut storage,
+            &folder.id,
+            &dir.path,
+            &options(),
+            &mut sin_progreso,
+        )
+        .expect("indexa");
+
+        assert_eq!(summary.files_indexed, 1);
+        let chunks = storage
+            .list_chunks_for_path(&folder.id, "datos.csv")
+            .expect("lista");
+        assert!(!chunks.is_empty());
+        assert_eq!(
+            chunks[0].metadata.location.as_deref(),
+            Some("filas 1-2"),
+            "el CSV debe citar por filas"
+        );
+        assert!(chunks[0].content.contains("nombre: Ana"));
     }
 
     #[test]

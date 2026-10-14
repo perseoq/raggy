@@ -51,10 +51,15 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "memoria de proyecto: contenido y jerarquía de artefactos",
         sql: include_str!("../migrations/0006_artifact_memory.sql"),
     },
+    Migration {
+        version: 7,
+        description: "ubicación de origen del fragmento en documentos no Markdown",
+        sql: include_str!("../migrations/0007_chunk_location.sql"),
+    },
 ];
 
 /// Versión de esquema que espera este binario.
-pub const LATEST_SCHEMA_VERSION: i64 = 6;
+pub const LATEST_SCHEMA_VERSION: i64 = 7;
 
 /// Aplica todas las migraciones pendientes dentro de una transacción.
 pub fn apply(conn: &mut Connection) -> Result<i64> {
