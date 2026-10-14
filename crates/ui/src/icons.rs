@@ -47,6 +47,44 @@ pub fn pencil() -> egui::ImageSource<'static> {
     egui::include_image!("../assets/icons/pencil.svg")
 }
 
+/// Icono de añadir una carpeta.
+pub fn folder_plus() -> egui::ImageSource<'static> {
+    egui::include_image!("../assets/icons/folder-plus.svg")
+}
+
+/// Icono de subir archivos.
+pub fn upload() -> egui::ImageSource<'static> {
+    egui::include_image!("../assets/icons/upload.svg")
+}
+
+/// Icono de claves de API.
+pub fn key() -> egui::ImageSource<'static> {
+    egui::include_image!("../assets/icons/key.svg")
+}
+
+/// Icono de configuración.
+pub fn settings() -> egui::ImageSource<'static> {
+    egui::include_image!("../assets/icons/settings.svg")
+}
+
+/// Icono de artefactos.
+pub fn archive() -> egui::ImageSource<'static> {
+    egui::include_image!("../assets/icons/archive.svg")
+}
+
+/// Botón con un icono y un texto.
+pub fn labelled_button(
+    ui: &mut egui::Ui,
+    source: egui::ImageSource<'static>,
+    label: &str,
+    tint: Color32,
+) -> Response {
+    let image = egui::Image::new(source)
+        .fit_to_exact_size(Vec2::splat(15.0))
+        .tint(tint);
+    ui.add(egui::Button::image_and_text(image, label))
+}
+
 /// Dibuja un icono vectorial sin botón.
 pub fn icon(
     ui: &mut egui::Ui,

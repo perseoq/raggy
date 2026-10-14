@@ -9,6 +9,21 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [1.0.23] - 2026-10-14
+
+### Cambiado
+
+- **Barra superior reorganizada**: el nombre y la versión quedan a la izquierda
+  (con el directorio de datos en la ayuda emergente), las acciones principales
+  llevan **icono y texto** («Añadir carpeta», «Subir archivos», «Reindexar todo»)
+  y las secundarias pasan a **iconos con ayuda emergente** a la derecha
+  (Configuración, Claves de API, Artefactos). Desaparece la ruta larga del
+  directorio de datos de la barra.
+- La ventana de **Configuración** es más ancha y **desplazable**, para que quepa
+  en pantallas pequeñas.
+- Cinco iconos SVG nuevos: `folder-plus`, `upload`, `key`, `settings` y
+  `archive`.
+
 ## [1.0.22] - 2026-10-14
 
 ### Cambiado
@@ -133,7 +148,8 @@ Primera versión estable: cubre las 32 historias de usuario de `hu.md`.
   (arm64) y Windows, se empaquetan con sus checksums SHA-256 y se publican en
   GitHub Releases.
 
-[No publicado]: https://github.com/perseoq/raggy/compare/v1.0.22...HEAD
+[No publicado]: https://github.com/perseoq/raggy/compare/v1.0.23...HEAD
+[1.0.23]: https://github.com/perseoq/raggy/releases/tag/v1.0.23
 [1.0.22]: https://github.com/perseoq/raggy/releases/tag/v1.0.22
 [1.0.21]: https://github.com/perseoq/raggy/releases/tag/v1.0.21
 [1.0.20]: https://github.com/perseoq/raggy/releases/tag/v1.0.20

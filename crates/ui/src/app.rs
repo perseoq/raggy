@@ -1398,35 +1398,72 @@ impl RaggyApp {
     fn top_bar(ui: &mut egui::Ui, data_dir: &Path) -> TopActions {
         let mut actions = TopActions::default();
         egui::Panel::top("top_bar").show(ui, |ui| {
-            ui.add_space(4.0);
+            ui.add_space(5.0);
             ui.horizontal(|ui| {
-                ui.heading(APP_NAME);
+                let dark = ui.visuals().dark_mode;
+                let accent = crate::theme::accent(dark);
+                let tint = ui.visuals().weak_text_color();
+
+                ui.add_space(4.0);
+                crate::icons::icon(ui, crate::icons::folder(), accent, 17.0);
+                ui.add_space(2.0);
+                ui.label(egui::RichText::new(APP_NAME).strong())
+                    .on_hover_text(format!("Datos: {}", data_dir.display()));
+                ui.weak(egui::RichText::new(format!("v{APP_VERSION}")).small());
+                ui.add_space(4.0);
                 ui.separator();
-                ui.label(format!("v{APP_VERSION}"));
-                ui.separator();
-                if ui.button("Añadir carpeta").clicked() {
+
+                if crate::icons::labelled_button(
+                    ui,
+                    crate::icons::folder_plus(),
+                    "Añadir carpeta",
+                    tint,
+                )
+                .clicked()
+                {
                     actions.add = true;
                 }
-                if ui.button("Subir archivos").clicked() {
+                if crate::icons::labelled_button(ui, crate::icons::upload(), "Subir archivos", tint)
+                    .clicked()
+                {
                     actions.upload = true;
                 }
-                if ui.button("Reindexar todo").clicked() {
+                if crate::icons::labelled_button(
+                    ui,
+                    crate::icons::refresh(),
+                    "Reindexar todo",
+                    tint,
+                )
+                .clicked()
+                {
                     actions.reindex_all = true;
                 }
-                if ui.button("Configuración").clicked() {
-                    actions.settings = true;
-                }
-                if ui.button("Claves de API").clicked() {
-                    actions.keys = true;
-                }
-                if ui.button("Artefactos").clicked() {
-                    actions.artifacts = true;
-                }
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(format!("Datos: {}", data_dir.display()));
+                    ui.add_space(6.0);
+                    if crate::icons::icon_button(
+                        ui,
+                        crate::icons::settings(),
+                        "Configuración",
+                        tint,
+                    )
+                    .clicked()
+                    {
+                        actions.settings = true;
+                    }
+                    if crate::icons::icon_button(ui, crate::icons::key(), "Claves de API", tint)
+                        .clicked()
+                    {
+                        actions.keys = true;
+                    }
+                    if crate::icons::icon_button(ui, crate::icons::archive(), "Artefactos", tint)
+                        .clicked()
+                    {
+                        actions.artifacts = true;
+                    }
                 });
             });
-            ui.add_space(4.0);
+            ui.add_space(5.0);
         });
         actions
     }
@@ -2563,9 +2600,12 @@ impl RaggyApp {
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
-            .default_width(640.0)
+            .default_width(660.0)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(560.0)
+                    .show(ui, |ui| {
                 ui.strong("Apariencia");
                 ui.horizontal(|ui| {
                     ui.label("Tema:");
@@ -2693,6 +2733,7 @@ impl RaggyApp {
                         cancel = true;
                     }
                 });
+                    });
             });
 
         if let Some(theme) = theme_change {
