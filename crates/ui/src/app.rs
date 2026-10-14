@@ -475,6 +475,11 @@ impl RaggyApp {
                 ocr_enabled: self.config.ingest.ocr_enabled,
                 ocr_languages: self.config.ingest.ocr_languages.clone(),
                 min_text_chars: self.config.ingest.min_text_chars,
+                max_file_bytes: self.config.ingest.max_file_mb * 1024 * 1024,
+                max_archive_bytes: self.config.ingest.max_archive_mb * 1024 * 1024,
+                max_pages: self.config.ingest.max_pages,
+                process_timeout_secs: self.config.ingest.process_timeout_secs,
+                max_ocr_image_pixels: self.config.ingest.max_ocr_image_pixels,
             },
         }
     }
@@ -1366,10 +1371,11 @@ impl RaggyApp {
                         entry.progress = None;
                         entry.error = None;
                         entry.message = Some(format!(
-                            "{} indexados · {} sin cambios · {} retirados · {} fragmentos",
+                            "{} indexados · {} sin cambios · {} retirados · {} fallidos · {} fragmentos",
                             summary.files_indexed,
                             summary.files_skipped,
                             summary.files_removed,
+                            summary.files_failed,
                             summary.chunks_written
                         ));
                     }
@@ -1381,7 +1387,7 @@ impl RaggyApp {
                         )
                     } else {
                         format!(
-                            "Indexación completada con {} avisos (ver Configuración › OCR).",
+                            "Indexación completada con {} avisos (ver Configuración › OCR y conversión).",
                             summary.warnings.len()
                         )
                     };
@@ -2761,6 +2767,41 @@ impl RaggyApp {
                             .range(0..=5000),
                     );
                 });
+                egui::Grid::new("ingest_limits_grid")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        ui.label("Tamaño máximo de archivo (MiB)");
+                        ui.add(
+                            egui::DragValue::new(&mut self.settings_ingest.max_file_mb)
+                                .range(1..=16_384),
+                        );
+                        ui.end_row();
+
+                        ui.label("Descompresión máxima Office (MiB)");
+                        ui.add(egui::DragValue::new(
+                            &mut self.settings_ingest.max_archive_mb,
+                        ).range(1..=32_768));
+                        ui.end_row();
+
+                        ui.label("Máximo de páginas PDF");
+                        ui.add(
+                            egui::DragValue::new(&mut self.settings_ingest.max_pages)
+                                .range(1..=100_000),
+                        );
+                        ui.end_row();
+
+                        ui.label("Tiempo máximo por herramienta (segundos)");
+                        ui.add(egui::DragValue::new(
+                            &mut self.settings_ingest.process_timeout_secs,
+                        ).range(1..=3600));
+                        ui.end_row();
+
+                        ui.label("Píxeles máximos por página OCR");
+                        ui.add(egui::DragValue::new(
+                            &mut self.settings_ingest.max_ocr_image_pixels,
+                        ).range(262_144..=67_108_864));
+                        ui.end_row();
+                    });
                 ui.horizontal(|ui| {
                     if ui.button("Comprobar herramientas").clicked() {
                         check_tools = true;
@@ -2882,7 +2923,10 @@ impl RaggyApp {
         }
         if check_tools {
             self.settings_ingest.ocr_languages = parse_languages(&self.settings_languages);
-            self.tools_report = Some(tools_report(&self.settings_ingest.ocr_languages));
+            self.tools_report = Some(tools_report(
+                &self.settings_ingest.ocr_languages,
+                self.settings_ingest.process_timeout_secs,
+            ));
         }
         if clear_warnings {
             self.index_warnings.clear();

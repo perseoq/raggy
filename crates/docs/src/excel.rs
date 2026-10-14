@@ -7,16 +7,42 @@
 
 use std::path::Path;
 
-use calamine::{open_workbook_auto, Data, Range, Reader};
+use calamine::{open_workbook_auto_from_rs, Data, Range, Reader};
 
-use crate::{column_letter, DocKind, ExtractError, ExtractedDocument, Location, Result, Section};
+use crate::{
+    column_letter, read_bytes_limited, validate_zip_size, DocKind, ExtractError, ExtractedDocument,
+    Location, Result, Section,
+};
 
 /// Número de filas de datos por sección.
 const ROWS_PER_SECTION: usize = 100;
 
 /// Extrae todas las hojas del libro como secciones.
 pub fn extract(path: &Path) -> Result<ExtractedDocument> {
-    let mut workbook = open_workbook_auto(path).map_err(parse_error)?;
+    let bytes = read_bytes_limited(path, 100 * 1024 * 1024)?;
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    extract_with_limits(&bytes, extension, 512 * 1024 * 1024)
+}
+
+/// Extrae un libro ya limitado por tamaño, imponiendo además una cota de
+/// expansión al paquete ZIP de XLSX/XLSM/XLSB.
+pub fn extract_with_limits(
+    bytes: &[u8],
+    extension: &str,
+    max_archive_bytes: u64,
+) -> Result<ExtractedDocument> {
+    if matches!(
+        extension.to_ascii_lowercase().as_str(),
+        "xlsx" | "xlsm" | "xlsb"
+    ) {
+        validate_zip_size(bytes, max_archive_bytes)?;
+    }
+
+    let mut workbook =
+        open_workbook_auto_from_rs(std::io::Cursor::new(bytes.to_vec())).map_err(parse_error)?;
     let sheets = workbook.sheet_names().to_vec();
     let mut sections = Vec::new();
 

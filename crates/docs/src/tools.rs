@@ -8,7 +8,8 @@
 //! avisa con el comando de instalación adecuado.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::Duration;
 
 /// Herramienta externa opcional.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,20 +51,32 @@ pub struct Tools {
     pub pdftoppm: Option<PathBuf>,
     /// Idiomas que reconoce Tesseract (vacío si no se pudo consultar).
     pub languages: Vec<String>,
+    /// Si fue posible consultar la lista de idiomas de Tesseract.
+    pub languages_known: bool,
 }
 
 impl Tools {
     /// Detecta las herramientas disponibles en el sistema.
     pub fn detect() -> Self {
+        Self::detect_with_timeout(10)
+    }
+
+    /// Detecta herramientas; la consulta a `tesseract --list-langs` queda
+    /// limitada para que el diagnóstico no pueda bloquear indefinidamente.
+    pub fn detect_with_timeout(timeout_secs: u64) -> Self {
+        const MAX_PROBE_TIMEOUT_SECS: u64 = 15;
+        let probe_timeout = timeout_secs.clamp(1, MAX_PROBE_TIMEOUT_SECS);
         let tesseract = find_program(ExternalTool::Tesseract);
-        let languages = tesseract
+        let language_result = tesseract
             .as_deref()
-            .map(tesseract_languages)
-            .unwrap_or_default();
+            .and_then(|program| tesseract_languages(program, probe_timeout));
+        let languages_known = language_result.is_some();
+        let languages = language_result.unwrap_or_default();
         Self {
             tesseract,
             pdftoppm: find_program(ExternalTool::Poppler),
             languages,
+            languages_known,
         }
     }
 
@@ -74,11 +87,10 @@ impl Tools {
 
     /// ¿Está todo listo para OCR con los idiomas pedidos?
     pub fn ready_for(&self, languages: &[String]) -> bool {
-        if self.tesseract.is_none() {
-            return false;
-        }
-        // Si no se pudo listar idiomas, se intenta igualmente.
-        self.languages.is_empty() || languages.iter().all(|l| self.has_language(l))
+        self.tesseract.is_some()
+            && self.pdftoppm.is_some()
+            && self.languages_known
+            && languages.iter().all(|language| self.has_language(language))
     }
 }
 
@@ -165,22 +177,35 @@ fn explicit_path(variable: &str) -> Option<PathBuf> {
 }
 
 /// Idiomas que reconoce `tesseract --list-langs`.
-fn tesseract_languages(program: &Path) -> Vec<String> {
-    let Ok(output) = Command::new(program).arg("--list-langs").output() else {
-        return Vec::new();
-    };
+fn tesseract_languages(program: &Path, timeout_secs: u64) -> Option<Vec<String>> {
+    let directory = crate::temp_directory("tesseract-probe").ok()?;
+    let stdout_path = directory.path().join("stdout.txt");
+    let stderr_path = directory.path().join("stderr.txt");
+    let stdout = std::fs::File::create(&stdout_path).ok()?;
+    let stderr = std::fs::File::create(&stderr_path).ok()?;
+    let mut command = Command::new(program);
+    command
+        .arg("--list-langs")
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr));
+    let status = crate::run_with_timeout(&mut command, Duration::from_secs(timeout_secs)).ok()?;
+    if !status.success() {
+        return None;
+    }
 
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    let mut text = std::fs::read_to_string(stdout_path).unwrap_or_default();
     text.push('\n');
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    text.push_str(&std::fs::read_to_string(stderr_path).unwrap_or_default());
 
-    text.lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .filter(|line| !line.to_ascii_lowercase().starts_with("list of"))
-        .filter(|line| !line.contains(' ') && !line.contains('/') && !line.contains('\\'))
-        .map(str::to_string)
-        .collect()
+    Some(
+        text.lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .filter(|line| !line.to_ascii_lowercase().starts_with("list of"))
+            .filter(|line| !line.contains(' ') && !line.contains('/') && !line.contains('\\'))
+            .map(str::to_string)
+            .collect(),
+    )
 }
 
 /// Comando de instalación recomendado para una herramienta (con el paquete de
@@ -315,6 +340,9 @@ mod tests {
     #[test]
     fn detectar_no_entra_en_panico() {
         let tools = Tools::detect();
-        assert_eq!(tools.ready_for(&[]), tools.tesseract.is_some());
+        assert_eq!(
+            tools.ready_for(&[]),
+            tools.tesseract.is_some() && tools.pdftoppm.is_some() && tools.languages_known
+        );
     }
 }

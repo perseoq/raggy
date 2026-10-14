@@ -20,7 +20,10 @@ pub mod text;
 pub mod tools;
 pub mod word;
 
+use std::io::{self, Read};
 use std::path::Path;
+use std::process::{Command, ExitStatus};
+use std::time::{Duration, Instant};
 
 /// Crea un directorio temporal privado y único; se elimina al salir de scope.
 pub(crate) fn temp_directory(prefix: &str) -> std::io::Result<tempfile::TempDir> {
@@ -33,6 +36,98 @@ pub(crate) fn temp_directory(prefix: &str) -> std::io::Result<tempfile::TempDir>
         builder.permissions(std::fs::Permissions::from_mode(0o700));
     }
     builder.tempdir()
+}
+
+/// Valida la expansión real de todas las entradas de un ZIP antes de pasar el
+/// archivo a extractores que lo procesan internamente (p. ej. `calamine`).
+pub(crate) fn validate_zip_size(bytes: &[u8], max_uncompressed_bytes: u64) -> Result<()> {
+    const MAX_ENTRIES: usize = 100_000;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+        .map_err(|error| ExtractError::Parse(format!("paquete Office inválido: {error}")))?;
+    if archive.len() > MAX_ENTRIES {
+        return Err(ExtractError::ResourceLimit(format!(
+            "el paquete contiene {} entradas; el máximo es {MAX_ENTRIES}",
+            archive.len()
+        )));
+    }
+
+    let mut total = 0u64;
+    for index in 0..archive.len() {
+        let entry = archive
+            .by_index(index)
+            .map_err(|error| ExtractError::Parse(format!("entrada Office inválida: {error}")))?;
+        // Se mide lo que realmente descomprime, no solo el tamaño declarado en
+        // la cabecera ZIP, para detectar tamaños falsificados.
+        let remaining = max_uncompressed_bytes.saturating_sub(total);
+        let mut bounded = entry.take(remaining.saturating_add(1));
+        let copied = io::copy(&mut bounded, &mut io::sink())
+            .map_err(|error| ExtractError::Parse(format!("no se pudo validar el ZIP: {error}")))?;
+        total = total.saturating_add(copied);
+        if total > max_uncompressed_bytes {
+            return Err(ExtractError::ResourceLimit(format!(
+                "el paquete Office descomprime más de {max_uncompressed_bytes} bytes"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+/// Ejecuta un proceso con un timeout, sin tuberías bloqueantes. El llamador
+/// puede redirigir stdout/stderr a archivos si necesita capturar su salida.
+pub(crate) fn run_with_timeout(command: &mut Command, timeout: Duration) -> io::Result<ExitStatus> {
+    let mut child = command.spawn()?;
+    let started = Instant::now();
+    let deadline = started
+        .checked_add(timeout)
+        .unwrap_or_else(|| started + Duration::from_secs(3600));
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!(
+                        "el proceso excedió el límite de {} segundos",
+                        timeout.as_secs()
+                    ),
+                ));
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        }
+    }
+}
+
+/// Lee un archivo limitando los bytes realmente recibidos, incluso si crece
+/// después de consultar sus metadatos.
+pub(crate) fn read_bytes_limited(path: &Path, max_bytes: u64) -> Result<Vec<u8>> {
+    let file = std::fs::File::open(path).map_err(|source| ExtractError::Io {
+        path: path.display().to_string(),
+        source,
+    })?;
+    let mut bytes = Vec::new();
+    file.take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|source| ExtractError::Io {
+            path: path.display().to_string(),
+            source,
+        })?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(ExtractError::ResourceLimit(format!(
+            "`{}` excede el límite configurado de {max_bytes} bytes",
+            path.display()
+        )));
+    }
+    Ok(bytes)
 }
 
 #[cfg(test)]
@@ -72,6 +167,61 @@ mod temporary_directory_tests {
     }
 }
 
+#[cfg(test)]
+mod resource_limit_tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn limita_lecturas_de_archivos() {
+        let mut file = tempfile::NamedTempFile::new().expect("archivo temporal");
+        file.write_all(b"contenido largo").expect("escribe");
+        let error = read_bytes_limited(file.path(), 4).expect_err("debe superar el límite");
+        assert!(matches!(error, ExtractError::ResourceLimit(_)));
+    }
+
+    #[test]
+    fn el_despachador_rechaza_entradas_mayores_al_limite() {
+        let directory = tempfile::tempdir().expect("directorio temporal");
+        let path = directory.path().join("entrada.txt");
+        std::fs::write(&path, b"demasiado largo").expect("escribe archivo");
+        let options = ExtractOptions {
+            max_file_bytes: 4,
+            ..ExtractOptions::default()
+        };
+        let error = extract(&path, &options).expect_err("rechaza por tamaño");
+        assert!(matches!(error, ExtractError::ResourceLimit(_)));
+    }
+
+    #[test]
+    fn limita_la_expansion_real_de_archivos_zip() {
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        writer
+            .start_file(
+                "word/document.xml",
+                zip::write::SimpleFileOptions::default(),
+            )
+            .expect("abre entrada");
+        writer
+            .write_all(&vec![b'x'; 1024])
+            .expect("escribe entrada");
+        let bytes = writer.finish().expect("cierra zip").into_inner();
+
+        let error = validate_zip_size(&bytes, 64).expect_err("debe superar el límite");
+        assert!(matches!(error, ExtractError::ResourceLimit(_)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn termina_un_proceso_que_excede_el_timeout() {
+        let mut command = Command::new("sleep");
+        command.arg("2");
+        let error = run_with_timeout(&mut command, Duration::from_millis(30))
+            .expect_err("el proceso debe agotar su tiempo");
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+    }
+}
+
 /// Error de extracción de un documento.
 #[derive(Debug, thiserror::Error)]
 pub enum ExtractError {
@@ -92,6 +242,10 @@ pub enum ExtractError {
     /// El documento está dañado o no se puede interpretar.
     #[error("no se pudo interpretar el documento: {0}")]
     Parse(String),
+
+    /// El documento excede un límite de recursos configurado.
+    #[error("se superó el límite de recursos: {0}")]
+    ResourceLimit(String),
 }
 
 /// Alias de resultado del crate.
@@ -254,6 +408,16 @@ pub struct ExtractOptions {
     pub ocr_languages: Vec<String>,
     /// Texto mínimo de una página para considerar que tiene capa de texto.
     pub min_text_chars: usize,
+    /// Tamaño máximo de entrada, en bytes.
+    pub max_file_bytes: u64,
+    /// Máximo total descomprimido para documentos Office ZIP.
+    pub max_archive_bytes: u64,
+    /// Máximo de páginas PDF a extraer.
+    pub max_pages: usize,
+    /// Tiempo máximo de espera de cada herramienta externa, en segundos.
+    pub process_timeout_secs: u64,
+    /// Máximo de píxeles por página durante el OCR.
+    pub max_ocr_image_pixels: u64,
 }
 
 impl Default for ExtractOptions {
@@ -262,6 +426,11 @@ impl Default for ExtractOptions {
             ocr_enabled: true,
             ocr_languages: vec!["spa".to_string()],
             min_text_chars: 24,
+            max_file_bytes: 100 * 1024 * 1024,
+            max_archive_bytes: 512 * 1024 * 1024,
+            max_pages: 500,
+            process_timeout_secs: 120,
+            max_ocr_image_pixels: 20_000_000,
         }
     }
 }
@@ -271,29 +440,49 @@ pub fn extract(path: &Path, options: &ExtractOptions) -> Result<ExtractedDocumen
     let extension = path
         .extension()
         .and_then(|extension| extension.to_str())
+        .unwrap_or_default();
+    if DocKind::from_extension(extension).is_none() {
+        return Err(ExtractError::Unsupported(extension.to_ascii_lowercase()));
+    }
+    let bytes = read_bytes_limited(path, options.max_file_bytes)?;
+    extract_bytes(path, &bytes, options)
+}
+
+/// Extrae desde los bytes ya leídos por el indexador. Así el hash incremental y
+/// el contenido extraído siempre corresponden a la misma versión del archivo.
+pub fn extract_bytes(
+    path: &Path,
+    bytes: &[u8],
+    options: &ExtractOptions,
+) -> Result<ExtractedDocument> {
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
 
     let kind = DocKind::from_extension(&extension)
         .ok_or_else(|| ExtractError::Unsupported(extension.clone()))?;
 
-    Ok(match kind {
-        DocKind::Text => text::extract(&read_bytes(path)?),
-        DocKind::Csv => csv::extract(&read_bytes(path)?)?,
-        DocKind::Excel => excel::extract(path)?,
-        DocKind::Word => word::extract(&read_bytes(path)?)?,
-        DocKind::PowerPoint => slides::extract(&read_bytes(path)?)?,
-        DocKind::Pdf => pdf::extract(path, options)?,
-        DocKind::WordLegacy => legacy::extract(path, legacy::LegacyTarget::Word)?,
-        DocKind::PresentationLegacy => legacy::extract(path, legacy::LegacyTarget::Presentation)?,
-    })
-}
+    if bytes.len() as u64 > options.max_file_bytes {
+        return Err(ExtractError::ResourceLimit(format!(
+            "`{}` excede el límite configurado de {} bytes",
+            path.display(),
+            options.max_file_bytes
+        )));
+    }
 
-/// Lee el archivo como bytes, con un error que incluye la ruta.
-pub(crate) fn read_bytes(path: &Path) -> Result<Vec<u8>> {
-    std::fs::read(path).map_err(|source| ExtractError::Io {
-        path: path.display().to_string(),
-        source,
+    Ok(match kind {
+        DocKind::Text => text::extract(bytes),
+        DocKind::Csv => csv::extract(bytes)?,
+        DocKind::Excel => excel::extract_with_limits(bytes, &extension, options.max_archive_bytes)?,
+        DocKind::Word => word::extract_with_limits(bytes, options.max_archive_bytes)?,
+        DocKind::PowerPoint => slides::extract_with_limits(bytes, options.max_archive_bytes)?,
+        DocKind::Pdf => pdf::extract(path, bytes, options)?,
+        DocKind::WordLegacy => legacy::extract(path, bytes, legacy::LegacyTarget::Word, options)?,
+        DocKind::PresentationLegacy => {
+            legacy::extract(path, bytes, legacy::LegacyTarget::Presentation, options)?
+        }
     })
 }
 

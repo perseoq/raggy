@@ -6,6 +6,7 @@
 //! los archivos que ya no existen se retiran solo si el recorrido fue completo.
 
 use std::collections::{HashMap, HashSet};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
@@ -154,7 +155,7 @@ fn scan_indexable_files_checked(root: &Path) -> (Vec<PathBuf>, bool, Vec<String>
 /// Poppler o LibreOffice después de una indexación fallida, la huella cambia y
 /// el siguiente reindexado vuelve a procesar esos archivos.
 fn processing_fingerprint(options: &IndexOptions) -> String {
-    let mut tools = Tools::detect();
+    let mut tools = Tools::detect_with_timeout(options.extract.process_timeout_secs);
     tools.languages.sort();
     let path_label = |path: &Option<PathBuf>| {
         path.as_ref()
@@ -166,7 +167,7 @@ fn processing_fingerprint(options: &IndexOptions) -> String {
         .unwrap_or_else(|| "ausente".to_string());
     let embedding = HashingEmbedding::new(options.embedding_dimensions);
     let descriptor = format!(
-        "pipeline={INDEX_PIPELINE_VERSION};chunk_size={};chunk_overlap={};embedding_name={};embedding_dimensions={};ocr_enabled={};ocr_languages={};min_text_chars={};tesseract={};tesseract_languages={};pdftoppm={};libreoffice={}",
+        "pipeline={INDEX_PIPELINE_VERSION};chunk_size={};chunk_overlap={};embedding_name={};embedding_dimensions={};ocr_enabled={};ocr_languages={};min_text_chars={};max_file_bytes={};max_archive_bytes={};max_pages={};process_timeout_secs={};max_ocr_image_pixels={};tesseract={};tesseract_languages={};pdftoppm={};libreoffice={}",
         options.chunking.max_chars,
         options.chunking.overlap_chars,
         embedding.name(),
@@ -174,6 +175,11 @@ fn processing_fingerprint(options: &IndexOptions) -> String {
         options.extract.ocr_enabled,
         options.extract.ocr_languages.join(","),
         options.extract.min_text_chars,
+        options.extract.max_file_bytes,
+        options.extract.max_archive_bytes,
+        options.extract.max_pages,
+        options.extract.process_timeout_secs,
+        options.extract.max_ocr_image_pixels,
         path_label(&tools.tesseract),
         tools.languages.join(","),
         path_label(&tools.pdftoppm),
@@ -254,10 +260,16 @@ pub fn index_folder(
             total,
         });
 
-        let bytes = match std::fs::read(path) {
+        let bytes = match read_file_limited(path, options.extract.max_file_bytes) {
             Ok(bytes) => bytes,
             Err(error) => {
-                tracing::warn!(path = %path.display(), "archivo ilegible, se omite: {error}");
+                let warning = if error.kind() == std::io::ErrorKind::InvalidData {
+                    format!("`{relative}` se omitió: {error}")
+                } else {
+                    format!("`{relative}` no se pudo leer y se omitió: {error}")
+                };
+                tracing::warn!(path = %path.display(), "{warning}");
+                summary.warnings.push(warning);
                 summary.files_failed += 1;
                 continue;
             }
@@ -280,10 +292,9 @@ pub fn index_folder(
         let (chunks, warnings) = match extract_chunks(path, &relative, &bytes, &chunker, options) {
             Ok(result) => result,
             Err(error) => {
-                tracing::warn!(
-                    path = %path.display(),
-                    "no se pudo extraer el texto, se omite: {error}"
-                );
+                let warning = format!("`{relative}` no se pudo extraer y se omitió: {error}");
+                tracing::warn!(path = %path.display(), "{warning}");
+                summary.warnings.push(warning);
                 summary.files_failed += 1;
                 continue;
             }
@@ -342,6 +353,22 @@ pub fn index_folder(
     Ok(summary)
 }
 
+/// Lee como máximo `max_bytes + 1` bytes, para aplicar el límite a todos los
+/// formatos, incluidos Markdown, texto y código que usan su propio chunker.
+fn read_file_limited(path: &Path, max_bytes: u64) -> std::io::Result<Vec<u8>> {
+    let file = std::fs::File::open(path)?;
+    let mut bytes = Vec::new();
+    file.take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("el archivo supera el límite configurado de {max_bytes} bytes"),
+        ));
+    }
+    Ok(bytes)
+}
+
 /// ¿El archivo se trocea con el chunker de Markdown (encabezados y bloques de
 /// código) en lugar del chunker de documentos extraídos?
 fn uses_markdown_chunker(path: &Path) -> bool {
@@ -374,11 +401,12 @@ fn extract_chunks(
         return Ok((chunker.chunk(&source, &options.chunking), Vec::new()));
     }
 
-    let document =
-        raggy_docs::extract(path, &options.extract).map_err(|error| CoreError::Index {
+    let document = raggy_docs::extract_bytes(path, bytes, &options.extract).map_err(|error| {
+        CoreError::Index {
             path: path.to_path_buf(),
             message: error.to_string(),
-        })?;
+        }
+    })?;
     let warnings = document.warnings;
 
     let sections: Vec<DocumentSection> = document
@@ -727,6 +755,35 @@ mod tests {
             "el CSV debe citar hoja y coordenadas"
         );
         assert!(chunks[0].content.contains("Ana"));
+    }
+
+    #[test]
+    fn reporta_y_omite_archivos_que_superan_el_limite_de_ingesta() {
+        let dir = TemporalDir::new("limite");
+        dir.write("demasiado.txt", "este archivo excede el límite");
+
+        let mut storage = Storage::open_in_memory().expect("abre");
+        let folder = Folder::new(dir.path.to_string_lossy().to_string(), "docs");
+        storage.upsert_folder(&folder).expect("guarda");
+
+        let mut options = options();
+        options.extract.max_file_bytes = 4;
+        let mut sin_progreso = |_| {};
+        let summary = index_folder(
+            &mut storage,
+            &folder.id,
+            &dir.path,
+            &options,
+            &mut sin_progreso,
+        )
+        .expect("la indexación continúa con un aviso");
+
+        assert_eq!(summary.files_failed, 1);
+        assert!(summary.warnings[0].contains("supera el límite"));
+        assert!(storage
+            .list_documents(&folder.id)
+            .expect("lista")
+            .is_empty());
     }
 
     #[test]

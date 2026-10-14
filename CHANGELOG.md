@@ -29,6 +29,14 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
   usa un descriptor de directorio confinado a la carpeta elegida y no sigue
   enlaces simbólicos que escapen de ella. Los temporales de OCR y conversión
   ahora son privados, impredecibles y se limpian automáticamente.
+- **Fase 4 de correcciones 2.2.0 — límites de recursos**: opciones de ingesta
+  para tamaño máximo de archivo, expansión de paquetes Office, páginas PDF,
+  tiempo máximo de Tesseract/Poppler/LibreOffice y píxeles OCR. La expansión ZIP
+  se mide al descomprimir y el texto PDF tiene un tope por página y documento.
+- **Fase 4 de correcciones 2.2.0 — límites de recursos**: límites configurables
+  para tamaño de entrada, expansión de paquetes Office, páginas PDF y píxeles
+  OCR; timeout configurable de Tesseract/Poppler/LibreOffice. La extracción ZIP
+  comprueba los bytes realmente descomprimidos antes de invocar parsers.
 
 ## [2.1.0] - 2026-10-14
 

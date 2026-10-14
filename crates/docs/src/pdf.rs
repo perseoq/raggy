@@ -8,31 +8,49 @@ use std::path::Path;
 use lopdf::Document;
 
 use crate::ocr::Ocr;
-use crate::{
-    read_bytes, DocKind, ExtractError, ExtractOptions, ExtractedDocument, Location, Result, Section,
-};
+use crate::{DocKind, ExtractError, ExtractOptions, ExtractedDocument, Location, Result, Section};
 
-/// Tope de bytes descomprimidos por página (protección contra bombas).
-const MAX_PAGE_BYTES: usize = 64 * 1024 * 1024;
+/// Tope de bytes descomprimidos por página y por documento PDF.
+const MAX_PAGE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_DOCUMENT_TEXT_BYTES: usize = 64 * 1024 * 1024;
 
 /// Extrae el texto de un PDF, una sección por página.
-pub fn extract(path: &Path, options: &ExtractOptions) -> Result<ExtractedDocument> {
-    let bytes = read_bytes(path)?;
-    let document = Document::load_mem(&bytes).map_err(parse_error)?;
+pub fn extract(path: &Path, bytes: &[u8], options: &ExtractOptions) -> Result<ExtractedDocument> {
+    let document = Document::load_mem(bytes).map_err(parse_error)?;
 
     // Las herramientas de OCR se detectan solo si alguna página las necesita.
     let mut ocr: Option<Ocr> = None;
     let mut sections = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
     let file_name = file_name(path);
+    let pages = document.get_pages();
+    if pages.len() > options.max_pages {
+        warnings.push(format!(
+            "`{file_name}` tiene {} páginas; se procesan solo las primeras {} según el límite configurado.",
+            pages.len(),
+            options.max_pages
+        ));
+    }
 
-    for (number, _id) in document.get_pages() {
-        let mut text = normalize(&page_text(&document, number));
+    let mut total_text_bytes = 0usize;
+    for (number, _id) in pages.into_iter().take(options.max_pages) {
+        let remaining = MAX_DOCUMENT_TEXT_BYTES.saturating_sub(total_text_bytes);
+        if remaining == 0 {
+            push_unique(
+                &mut warnings,
+                format!("`{file_name}` excede el límite de texto PDF de {MAX_DOCUMENT_TEXT_BYTES} bytes."),
+            );
+            break;
+        }
+        let page_limit = remaining.min(MAX_PAGE_BYTES);
+        let mut text = normalize(&page_text(&document, number, page_limit));
 
         if text.chars().count() < options.min_text_chars && options.ocr_enabled {
-            let ocr = ocr.get_or_insert_with(|| Ocr::detect(&options.ocr_languages));
+            let ocr = ocr.get_or_insert_with(|| {
+                Ocr::detect(&options.ocr_languages, options.process_timeout_secs)
+            });
             if ocr.is_ready() {
-                match ocr.recognize_pdf_page(path, number) {
+                match ocr.recognize_pdf_page(path, number, options.max_ocr_image_pixels) {
                     Ok(recognized) => {
                         let recognized = normalize(&recognized);
                         if !recognized.is_empty() {
@@ -59,6 +77,14 @@ pub fn extract(path: &Path, options: &ExtractOptions) -> Result<ExtractedDocumen
         }
 
         if !text.is_empty() {
+            if text.len() > remaining {
+                text.truncate(last_char_boundary(&text, remaining));
+                push_unique(
+                    &mut warnings,
+                    format!("`{file_name}` alcanzó el límite de texto PDF de {MAX_DOCUMENT_TEXT_BYTES} bytes."),
+                );
+            }
+            total_text_bytes = total_text_bytes.saturating_add(text.len());
             sections.push(Section {
                 heading: None,
                 location: Location::Page(number),
@@ -73,10 +99,19 @@ pub fn extract(path: &Path, options: &ExtractOptions) -> Result<ExtractedDocumen
 }
 
 /// Texto de una página con la capa existente (sin lanzar error si falla).
-fn page_text(document: &Document, number: u32) -> String {
+fn page_text(document: &Document, number: u32, max_bytes: usize) -> String {
     document
-        .extract_text_with_limit(&[number], MAX_PAGE_BYTES)
+        .extract_text_with_limit(&[number], max_bytes)
         .unwrap_or_default()
+}
+
+/// Encuentra el último límite UTF-8 que no supera `max_bytes`.
+fn last_char_boundary(text: &str, max_bytes: usize) -> usize {
+    let mut boundary = max_bytes.min(text.len());
+    while !text.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    boundary
 }
 
 /// Normaliza el texto de una página: recorta líneas y colapsa líneas en blanco.
@@ -128,6 +163,38 @@ fn parse_error(error: lopdf::Error) -> ExtractError {
 mod tests {
     use super::*;
 
+    fn blank_pdf(page_count: u32) -> Vec<u8> {
+        use lopdf::{dictionary, Document, Object};
+
+        let mut document = Document::with_version("1.5");
+        let pages_id = document.new_object_id();
+        let mut kids = Vec::new();
+        for _ in 0..page_count {
+            let page_id = document.add_object(dictionary! {
+                "Type" => "Page",
+                "Parent" => pages_id,
+                "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+            });
+            kids.push(Object::Reference(page_id));
+        }
+        document.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => kids,
+                "Count" => page_count,
+            }),
+        );
+        let catalog_id = document.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        document.trailer.set("Root", catalog_id);
+        let mut bytes = Vec::new();
+        document.save_to(&mut bytes).expect("serializa PDF");
+        bytes
+    }
+
     #[test]
     fn normaliza_lineas_y_espacios() {
         let raw = "  Título  \n\n\n  Cuerpo con texto  \n\n";
@@ -137,7 +204,7 @@ mod tests {
     #[test]
     fn un_pdf_invalido_da_error() {
         let options = ExtractOptions::default();
-        assert!(extract(Path::new("/tmp/raggy-pdf-inexistente.pdf"), &options).is_err());
+        assert!(extract(Path::new("/tmp/raggy-pdf.pdf"), b"invalid", &options).is_err());
     }
 
     #[test]
@@ -146,5 +213,33 @@ mod tests {
         push_unique(&mut warnings, "aviso".to_string());
         push_unique(&mut warnings, "aviso".to_string());
         assert_eq!(warnings.len(), 1);
+    }
+
+    #[test]
+    fn truncado_de_texto_respeta_utf8() {
+        let text = "áéíóú";
+        let boundary = last_char_boundary(text, 3);
+        assert!(text.is_char_boundary(boundary));
+        assert_eq!(&text[..boundary], "á");
+    }
+
+    #[test]
+    fn respeta_el_limite_de_paginas_y_emite_aviso() {
+        let options = ExtractOptions {
+            max_pages: 1,
+            ..ExtractOptions::default()
+        };
+        let bytes = blank_pdf(3);
+        let document = extract(Path::new("varias-paginas.pdf"), &bytes, &options)
+            .expect("extrae páginas limitadas");
+        assert_eq!(
+            document.sections.len(),
+            0,
+            "las páginas vacías no dan chunks"
+        );
+        assert!(document
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("solo las primeras 1")));
     }
 }

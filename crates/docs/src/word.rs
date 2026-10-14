@@ -16,11 +16,19 @@ use std::io::{Cursor, Read};
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 
-use crate::{DocKind, ExtractError, ExtractedDocument, Location, Result, Section};
+use crate::{
+    validate_zip_size, DocKind, ExtractError, ExtractedDocument, Location, Result, Section,
+};
 
 /// Extrae el texto de un `.docx` a partir de sus bytes.
 pub fn extract(bytes: &[u8]) -> Result<ExtractedDocument> {
-    let xml = read_document_xml(bytes)?;
+    extract_with_limits(bytes, 512 * 1024 * 1024)
+}
+
+/// Extrae un `.docx`, limitando la expansión total del paquete.
+pub fn extract_with_limits(bytes: &[u8], max_archive_bytes: u64) -> Result<ExtractedDocument> {
+    validate_zip_size(bytes, max_archive_bytes)?;
+    let xml = read_document_xml(bytes, max_archive_bytes)?;
     let (paragraphs, has_page_breaks) = parse_paragraphs(&xml)?;
     Ok(if has_page_breaks {
         build_pages(paragraphs)
@@ -37,12 +45,18 @@ struct Paragraph {
 }
 
 /// Lee `word/document.xml` del archivo ZIP.
-fn read_document_xml(bytes: &[u8]) -> Result<String> {
+fn read_document_xml(bytes: &[u8], max_bytes: u64) -> Result<String> {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(zip_error)?;
-    let mut file = archive.by_name("word/document.xml").map_err(zip_error)?;
+    let file = archive.by_name("word/document.xml").map_err(zip_error)?;
     let mut xml = String::new();
-    file.read_to_string(&mut xml)
+    file.take(max_bytes.saturating_add(1))
+        .read_to_string(&mut xml)
         .map_err(|error| ExtractError::Parse(error.to_string()))?;
+    if xml.len() as u64 > max_bytes {
+        return Err(ExtractError::ResourceLimit(format!(
+            "word/document.xml excede {max_bytes} bytes"
+        )));
+    }
     Ok(xml)
 }
 

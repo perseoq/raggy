@@ -105,6 +105,16 @@ pub struct IngestConfig {
     pub ocr_languages: Vec<String>,
     /// Texto mínimo de una página para no considerarla escaneada.
     pub min_text_chars: usize,
+    /// Tamaño máximo de archivo de entrada, en MiB.
+    pub max_file_mb: u64,
+    /// Máximo de bytes descomprimidos al leer un paquete Office (MiB).
+    pub max_archive_mb: u64,
+    /// Máximo de páginas PDF procesadas por documento.
+    pub max_pages: usize,
+    /// Tiempo máximo de espera para cada herramienta externa, en segundos.
+    pub process_timeout_secs: u64,
+    /// Máximo aproximado de píxeles por página al rasterizar para OCR.
+    pub max_ocr_image_pixels: u64,
 }
 
 impl Default for IngestConfig {
@@ -113,6 +123,11 @@ impl Default for IngestConfig {
             ocr_enabled: true,
             ocr_languages: vec!["spa".to_string()],
             min_text_chars: 24,
+            max_file_mb: 100,
+            max_archive_mb: 512,
+            max_pages: 500,
+            process_timeout_secs: 120,
+            max_ocr_image_pixels: 20_000_000,
         }
     }
 }
@@ -313,6 +328,31 @@ impl AppConfig {
                 "el OCR está activado pero no hay idiomas configurados".to_string(),
             ));
         }
+        if self.ingest.max_file_mb == 0 || self.ingest.max_file_mb > 16_384 {
+            return Err(CoreError::InvalidConfig(
+                "el límite de tamaño de archivo debe estar entre 1 y 16384 MiB".to_string(),
+            ));
+        }
+        if self.ingest.max_archive_mb == 0 || self.ingest.max_archive_mb > 32_768 {
+            return Err(CoreError::InvalidConfig(
+                "el límite de descompresión debe estar entre 1 y 32768 MiB".to_string(),
+            ));
+        }
+        if self.ingest.max_pages == 0 || self.ingest.max_pages > 100_000 {
+            return Err(CoreError::InvalidConfig(
+                "el máximo de páginas debe estar entre 1 y 100000".to_string(),
+            ));
+        }
+        if self.ingest.process_timeout_secs == 0 || self.ingest.process_timeout_secs > 3600 {
+            return Err(CoreError::InvalidConfig(
+                "el tiempo máximo de herramienta debe estar entre 1 y 3600 segundos".to_string(),
+            ));
+        }
+        if !(262_144..=67_108_864).contains(&self.ingest.max_ocr_image_pixels) {
+            return Err(CoreError::InvalidConfig(
+                "el máximo de píxeles OCR debe estar entre 262144 y 67108864".to_string(),
+            ));
+        }
         Ok(())
     }
 }
@@ -409,6 +449,27 @@ mod tests {
                 .expect("configuración anterior compatible");
         assert_eq!(old.theme, Theme::Dark);
         assert_eq!(old.privacy_notice_version, 0);
+    }
+
+    #[test]
+    fn valida_limites_de_ingesta() {
+        let config = AppConfig {
+            ingest: IngestConfig {
+                max_pages: 0,
+                ..IngestConfig::default()
+            },
+            ..AppConfig::default()
+        };
+        assert!(config.validate().is_err());
+
+        let config = AppConfig {
+            ingest: IngestConfig {
+                process_timeout_secs: 0,
+                ..IngestConfig::default()
+            },
+            ..AppConfig::default()
+        };
+        assert!(config.validate().is_err());
     }
 
     #[test]

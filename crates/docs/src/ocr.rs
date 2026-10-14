@@ -5,27 +5,27 @@
 //! informa de ello con la pista de instalación adecuada al sistema.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use crate::tools::{install_hint, ExternalTool, Tools};
 use crate::{ExtractError, Result};
-
-/// Resolución de rasterizado de una página de PDF, en puntos por pulgada.
-const PDF_DPI: &str = "300";
 
 /// Contexto de OCR: idiomas pedidos y herramientas detectadas.
 #[derive(Debug, Clone)]
 pub struct Ocr {
     languages: Vec<String>,
     tools: Tools,
+    timeout_secs: u64,
 }
 
 impl Ocr {
     /// Detecta las herramientas de OCR disponibles en el sistema.
-    pub fn detect(languages: &[String]) -> Self {
+    pub fn detect(languages: &[String], timeout_secs: u64) -> Self {
         Self {
             languages: languages.to_vec(),
-            tools: Tools::detect(),
+            tools: Tools::detect_with_timeout(timeout_secs),
+            timeout_secs,
         }
     }
 
@@ -58,12 +58,19 @@ impl Ocr {
                 install_hint(ExternalTool::Tesseract)
             )),
             Some(_) => {
-                for language in &self.languages {
-                    if !self.tools.languages.is_empty() && !self.tools.has_language(language) {
-                        reasons.push(format!(
-                            "Tesseract no tiene el idioma «{language}» ({})",
-                            install_hint(ExternalTool::Tesseract)
-                        ));
+                if !self.tools.languages_known {
+                    reasons.push(format!(
+                        "no se pudo comprobar la lista de idiomas de Tesseract ({})",
+                        install_hint(ExternalTool::Tesseract)
+                    ));
+                } else {
+                    for language in &self.languages {
+                        if !self.tools.has_language(language) {
+                            reasons.push(format!(
+                                "Tesseract no tiene el idioma «{language}» ({})",
+                                install_hint(ExternalTool::Tesseract)
+                            ));
+                        }
                     }
                 }
             }
@@ -80,7 +87,7 @@ impl Ocr {
     }
 
     /// Reconoce una página de PDF: la rasteriza con `pdftoppm` y aplica OCR.
-    pub fn recognize_pdf_page(&self, pdf: &Path, page: u32) -> Result<String> {
+    pub fn recognize_pdf_page(&self, pdf: &Path, page: u32, max_pixels: u64) -> Result<String> {
         let pdftoppm = self
             .tools
             .pdftoppm
@@ -91,12 +98,15 @@ impl Ocr {
             crate::temp_directory("ocr").map_err(|error| ExtractError::Parse(error.to_string()))?;
         let prefix = directory.path().join("page");
         let page_number = page.to_string();
+        let max_dimension = (max_pixels as f64).sqrt().floor().clamp(512.0, 8192.0) as u32;
+        let max_dimension = max_dimension.to_string();
 
-        let status = Command::new(pdftoppm)
+        let mut command = Command::new(pdftoppm);
+        command
             .args([
                 "-png",
-                "-r",
-                PDF_DPI,
+                "-scale-to",
+                &max_dimension,
                 "-f",
                 &page_number,
                 "-l",
@@ -104,12 +114,15 @@ impl Ocr {
             ])
             .arg(pdf)
             .arg(&prefix)
-            .status();
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        let status = crate::run_with_timeout(&mut command, Duration::from_secs(self.timeout_secs));
 
         let result = match status {
             Ok(status) if status.success() => first_png(directory.path())
                 .ok_or_else(|| ExtractError::Parse("pdftoppm no generó ninguna imagen".to_string()))
-                .and_then(|image| self.recognize_image(&image)),
+                .and_then(|image| self.recognize_image_in(&image, directory.path())),
             Ok(status) => Err(ExtractError::Parse(format!(
                 "pdftoppm terminó con {status}"
             ))),
@@ -120,6 +133,14 @@ impl Ocr {
 
     /// Aplica OCR a una imagen existente.
     pub fn recognize_image(&self, image: &Path) -> Result<String> {
+        let directory = crate::temp_directory("tesseract")
+            .map_err(|error| ExtractError::Parse(error.to_string()))?;
+        self.recognize_image_in(image, directory.path())
+    }
+
+    /// Ejecuta Tesseract y guarda su salida solo dentro del directorio temporal
+    /// privado de esta invocación.
+    fn recognize_image_in(&self, image: &Path, directory: &Path) -> Result<String> {
         let tesseract = self
             .tools
             .tesseract
@@ -132,22 +153,33 @@ impl Ocr {
             self.languages.join("+")
         };
 
-        let output = Command::new(tesseract)
+        let output_path = directory.join("recognized.txt");
+        let error_path = directory.join("tesseract.stderr");
+        let stdout = std::fs::File::create(&output_path)
+            .map_err(|error| ExtractError::Parse(error.to_string()))?;
+        let stderr = std::fs::File::create(&error_path)
+            .map_err(|error| ExtractError::Parse(error.to_string()))?;
+        let mut command = Command::new(tesseract);
+        command
             .arg(image)
             .arg("stdout")
             .arg("-l")
             .arg(&languages)
-            .output()
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr));
+        let status = crate::run_with_timeout(&mut command, Duration::from_secs(self.timeout_secs))
             .map_err(|error| ExtractError::Parse(error.to_string()))?;
 
-        if !output.status.success() {
+        if !status.success() {
+            let detail = std::fs::read_to_string(&error_path).unwrap_or_default();
             return Err(ExtractError::Parse(format!(
-                "tesseract terminó con {}",
-                output.status
+                "tesseract terminó con {status}: {}",
+                detail.chars().take(400).collect::<String>()
             )));
         }
 
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        std::fs::read_to_string(&output_path)
+            .map_err(|error| ExtractError::Parse(error.to_string()))
     }
 }
 
@@ -173,7 +205,7 @@ mod tests {
 
     #[test]
     fn unavailability_es_coherente_con_is_ready() {
-        let ocr = Ocr::detect(&["spa".to_string()]);
+        let ocr = Ocr::detect(&["spa".to_string()], 5);
         if ocr.is_ready() {
             assert!(ocr.unavailability().is_none());
         } else {
@@ -185,7 +217,7 @@ mod tests {
     fn reconoce_una_imagen_inexistente_sin_panico() {
         // Si no hay Tesseract, devuelve error; si lo hay, también (la imagen no
         // existe). En ningún caso debe entrar en pánico.
-        let ocr = Ocr::detect(&["eng".to_string()]);
+        let ocr = Ocr::detect(&["eng".to_string()], 5);
         let _ = ocr.recognize_image(Path::new("/tmp/raggy-no-existe.png"));
     }
 }

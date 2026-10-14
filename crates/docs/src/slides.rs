@@ -11,10 +11,18 @@ use std::io::{Cursor, Read};
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 
-use crate::{DocKind, ExtractError, ExtractedDocument, Location, Result, Section};
+use crate::{
+    validate_zip_size, DocKind, ExtractError, ExtractedDocument, Location, Result, Section,
+};
 
 /// Extrae las diapositivas de un `.pptx` a partir de sus bytes.
 pub fn extract(bytes: &[u8]) -> Result<ExtractedDocument> {
+    extract_with_limits(bytes, 512 * 1024 * 1024)
+}
+
+/// Extrae un `.pptx`, limitando la expansión total del paquete.
+pub fn extract_with_limits(bytes: &[u8], max_archive_bytes: u64) -> Result<ExtractedDocument> {
+    validate_zip_size(bytes, max_archive_bytes)?;
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(zip_error)?;
     let mut slide_names = slide_file_names(&mut archive);
 
@@ -27,8 +35,14 @@ pub fn extract(bytes: &[u8]) -> Result<ExtractedDocument> {
         archive
             .by_name(name)
             .map_err(zip_error)?
+            .take(max_archive_bytes.saturating_add(1))
             .read_to_string(&mut xml)
             .map_err(|error| ExtractError::Parse(error.to_string()))?;
+        if xml.len() as u64 > max_archive_bytes {
+            return Err(ExtractError::ResourceLimit(format!(
+                "{name} excede {max_archive_bytes} bytes"
+            )));
+        }
 
         let (title, lines) = parse_slide(&xml)?;
         let number = (index + 1) as u32;

@@ -7,10 +7,14 @@
 //! secciones y con un aviso que incluye cómo instalarlo.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use crate::tools::{find_libreoffice, install_hint, ExternalTool};
-use crate::{slides, temp_directory, word, DocKind, ExtractError, ExtractedDocument, Result};
+use crate::{
+    read_bytes_limited, run_with_timeout, slides, temp_directory, word, DocKind, ExtractError,
+    ExtractOptions, ExtractedDocument, Result,
+};
 
 /// Formato legacy que se quiere convertir.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,7 +44,12 @@ impl LegacyTarget {
 }
 
 /// Convierte y extrae un documento legacy.
-pub fn extract(path: &Path, target: LegacyTarget) -> Result<ExtractedDocument> {
+pub fn extract(
+    path: &Path,
+    input_bytes: &[u8],
+    target: LegacyTarget,
+    options: &ExtractOptions,
+) -> Result<ExtractedDocument> {
     let Some(soffice) = find_libreoffice() else {
         let mut document = ExtractedDocument::new(target.kind(), Vec::new());
         document.warnings.push(format!(
@@ -53,12 +62,28 @@ pub fn extract(path: &Path, target: LegacyTarget) -> Result<ExtractedDocument> {
 
     let directory =
         temp_directory("soffice").map_err(|error| ExtractError::Parse(error.to_string()))?;
-    let converted = convert(&soffice, path, target, directory.path())?;
-    dispatch(target, &converted)
+    let input_name = path.file_name().unwrap_or_default();
+    let input = directory.path().join(input_name);
+    std::fs::write(&input, input_bytes).map_err(|error| ExtractError::Parse(error.to_string()))?;
+    let converted = convert(
+        &soffice,
+        &input,
+        target,
+        directory.path(),
+        options.process_timeout_secs,
+    )?;
+    let converted_bytes = read_bytes_limited(&converted, options.max_file_bytes)?;
+    dispatch(target, &converted_bytes, options.max_archive_bytes)
 }
 
 /// Convierte el archivo con LibreOffice y devuelve la ruta del resultado.
-fn convert(soffice: &Path, path: &Path, target: LegacyTarget, directory: &Path) -> Result<PathBuf> {
+fn convert(
+    soffice: &Path,
+    path: &Path,
+    target: LegacyTarget,
+    directory: &Path,
+    timeout_secs: u64,
+) -> Result<PathBuf> {
     let mut command = Command::new(soffice);
     command.arg("--headless").arg("--norestore");
     // Perfil aislado para no chocar con una instancia de LibreOffice abierta.
@@ -74,8 +99,8 @@ fn convert(soffice: &Path, path: &Path, target: LegacyTarget, directory: &Path) 
         .arg(directory)
         .arg(path);
 
-    let status = command
-        .status()
+    command.stdout(Stdio::null()).stderr(Stdio::null());
+    let status = run_with_timeout(&mut command, Duration::from_secs(timeout_secs))
         .map_err(|error| ExtractError::Parse(error.to_string()))?;
     if !status.success() {
         return Err(ExtractError::Parse(format!(
@@ -96,11 +121,14 @@ fn convert(soffice: &Path, path: &Path, target: LegacyTarget, directory: &Path) 
 }
 
 /// Extrae el archivo ya convertido con el extractor correspondiente.
-fn dispatch(target: LegacyTarget, converted: &Path) -> Result<ExtractedDocument> {
-    let bytes = crate::read_bytes(converted)?;
+fn dispatch(
+    target: LegacyTarget,
+    bytes: &[u8],
+    max_archive_bytes: u64,
+) -> Result<ExtractedDocument> {
     match target {
-        LegacyTarget::Word => word::extract(&bytes),
-        LegacyTarget::Presentation => slides::extract(&bytes),
+        LegacyTarget::Word => word::extract_with_limits(bytes, max_archive_bytes),
+        LegacyTarget::Presentation => slides::extract_with_limits(bytes, max_archive_bytes),
     }
 }
 
@@ -153,7 +181,9 @@ mod tests {
         // Según haya LibreOffice o no, devuelve un aviso o un error, sin pánico.
         let _ = extract(
             Path::new("/tmp/raggy-legacy-inexistente.doc"),
+            b"legacy",
             LegacyTarget::Word,
+            &ExtractOptions::default(),
         );
     }
 }

@@ -30,13 +30,21 @@ Windows.
   español) rasterizando las páginas con **Poppler**. Si faltan las herramientas,
   la app avisa con el comando de instalación de tu sistema. Los `.doc`/`.ppt`
   legacy se convierten con **LibreOffice** si está instalado.
+- **Límites de recursos configurables** en Configuración: tamaño máximo de
+  archivo, expansión de Office, páginas PDF, píxeles OCR y timeout de las
+  herramientas externas. Los archivos que superan los límites se reportan sin
+  bloquear indefinidamente la indexación.
 - Botón **Subir archivos** para incorporar archivos sueltos: se copian
   a una carpeta gestionada («Archivos subidos») que se indexa como una más, sin
   tocar los originales.
 - **Chunking semántico**: respeta encabezados, listas y bloques de código (un
   bloque nunca se parte) y guarda archivo, ruta, encabezado padre y rango de líneas.
-- **Reindexación incremental** por hash y fecha de modificación: solo se
-  reprocesan los archivos nuevos o cambiados y se retiran los eliminados.
+- **Reindexación incremental** por hash del archivo y huella de opciones del
+  pipeline: los cambios de chunking, embeddings, OCR o herramientas disponibles
+  también se aplican al volver a indexar.
+- **Límites de recursos configurables**: tamaño máximo de archivo, expansión de
+  paquetes Office, páginas PDF, píxeles por imagen OCR y timeout de herramientas.
+  Un recorrido incompleto no retira del índice archivos que no pudo examinar.
 - **Vigilancia automática** de la carpeta: al cambiar un archivo se reindexa solo.
 - La indexación corre en segundo plano: la interfaz nunca se bloquea.
 
@@ -172,7 +180,9 @@ Todo vive en la **carpeta base** `~/.raggydesktop/`:
             "similarity_threshold": 0.3, "embedding_dimensions": 512 },
   "model": { "temperature": 0.1, "max_tokens": 2048,
              "default_provider": "deepseek", "default_model": "deepseek-chat" },
-  "ingest": { "ocr_enabled": true, "ocr_languages": ["spa"], "min_text_chars": 24 },
+  "ingest": { "ocr_enabled": true, "ocr_languages": ["spa"], "min_text_chars": 24,
+               "max_file_mb": 100, "max_archive_mb": 512, "max_pages": 500,
+               "process_timeout_secs": 120, "max_ocr_image_pixels": 20000000 },
   "data_dir": null,
   "api_keys": {}
 }

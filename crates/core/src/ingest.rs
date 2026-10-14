@@ -4,8 +4,8 @@ use raggy_docs::tools::{find_libreoffice, install_hint, ExternalTool, Tools};
 
 /// Informe legible del estado de Tesseract, Poppler y LibreOffice, con las
 /// pistas de instalación cuando falten.
-pub fn tools_report(languages: &[String]) -> String {
-    let tools = Tools::detect();
+pub fn tools_report(languages: &[String], timeout_secs: u64) -> String {
+    let tools = Tools::detect_with_timeout(timeout_secs);
     let mut lines = Vec::new();
 
     match &tools.tesseract {
@@ -19,8 +19,11 @@ pub fn tools_report(languages: &[String]) -> String {
                 "Tesseract: {} — idiomas: {list}",
                 program.display()
             ));
+            if !tools.languages_known {
+                lines.push("  ⚠ no se pudo comprobar la lista de idiomas de Tesseract".to_string());
+            }
             for language in languages {
-                if !tools.languages.is_empty() && !tools.has_language(language) {
+                if tools.languages_known && !tools.has_language(language) {
                     lines.push(format!(
                         "  ⚠ falta el idioma «{language}»: {}",
                         install_hint(ExternalTool::Tesseract)
@@ -59,7 +62,7 @@ mod tests {
 
     #[test]
     fn el_informe_menciona_las_tres_herramientas() {
-        let report = tools_report(&["spa".to_string()]);
+        let report = tools_report(&["spa".to_string()], 5);
         assert!(report.contains("Tesseract"), "{report}");
         assert!(report.contains("Poppler"), "{report}");
         assert!(report.contains("LibreOffice"), "{report}");
