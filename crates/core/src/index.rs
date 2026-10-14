@@ -336,17 +336,17 @@ fn extract_chunks(
 fn section_location(location: &raggy_docs::Location) -> SectionLocation {
     match location {
         raggy_docs::Location::Lines { start, .. } => SectionLocation::Lines { start: *start },
-        raggy_docs::Location::Rows { start, .. } => SectionLocation::Rows {
-            sheet: None,
-            columns: None,
-            first_row: *start,
-            prefix_lines: 0,
-        },
-        raggy_docs::Location::Sheet { name, start, .. } => SectionLocation::Rows {
-            sheet: Some(name.clone()),
-            columns: None,
-            first_row: *start,
-            prefix_lines: 0,
+        raggy_docs::Location::Rows {
+            sheet,
+            columns,
+            first_row,
+            prefix_lines,
+            ..
+        } => SectionLocation::Rows {
+            sheet: sheet.clone(),
+            columns: columns.clone(),
+            first_row: *first_row,
+            prefix_lines: *prefix_lines,
         },
         raggy_docs::Location::Slide(number) => SectionLocation::Slide(*number),
         raggy_docs::Location::Page(number) => SectionLocation::Page(*number),
@@ -656,10 +656,10 @@ mod tests {
         assert!(!chunks.is_empty());
         assert_eq!(
             chunks[0].metadata.location.as_deref(),
-            Some("hoja 1, filas 1-2"),
-            "el CSV debe citar hoja y filas"
+            Some("hoja 1, A2:B3"),
+            "el CSV debe citar hoja y coordenadas"
         );
-        assert!(chunks[0].content.contains("nombre: Ana"));
+        assert!(chunks[0].content.contains("Ana"));
     }
 
     #[test]

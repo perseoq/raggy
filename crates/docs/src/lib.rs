@@ -107,21 +107,18 @@ pub enum Location {
         /// Última línea incluida.
         end: usize,
     },
-    /// Rango de filas de datos de un CSV, sin contar la cabecera (1-based).
+    /// Filas de una hoja de cálculo o de un CSV.
     Rows {
-        /// Primera fila incluida.
-        start: usize,
-        /// Última fila incluida.
-        end: usize,
-    },
-    /// Rango de filas de una hoja de cálculo.
-    Sheet {
-        /// Nombre de la hoja.
-        name: String,
-        /// Primera fila incluida.
-        start: usize,
-        /// Última fila incluida.
-        end: usize,
+        /// Nombre de la hoja; `None` para CSV (se cita como «hoja 1»).
+        sheet: Option<String>,
+        /// Rango de columnas en letras, p. ej. `A:D`.
+        columns: Option<String>,
+        /// Número de la primera fila de datos (1-based).
+        first_row: usize,
+        /// Número de la última fila de datos (1-based).
+        last_row: usize,
+        /// Líneas iniciales de la sección que no son filas (p. ej. cabecera).
+        prefix_lines: usize,
     },
     /// Número de diapositiva de una presentación (1-based).
     Slide(u32),
@@ -134,14 +131,40 @@ impl Location {
     pub fn label(&self) -> String {
         match self {
             Location::Lines { start, end } => format!("líneas {start}-{end}"),
-            Location::Rows { start, end } => format!("filas {start}-{end}"),
-            Location::Sheet { name, start, end } => {
-                format!("hoja {name}, filas {start}-{end}")
+            Location::Rows {
+                sheet,
+                columns,
+                first_row,
+                last_row,
+                ..
+            } => {
+                let sheet = sheet.clone().unwrap_or_else(|| "1".to_string());
+                match columns
+                    .as_deref()
+                    .and_then(|columns| columns.split_once(':'))
+                {
+                    Some((first, last)) => {
+                        format!("hoja {sheet}, {first}{first_row}:{last}{last_row}")
+                    }
+                    None => format!("hoja {sheet}, filas {first_row}-{last_row}"),
+                }
             }
             Location::Slide(number) => format!("diapositiva {number}"),
             Location::Page(number) => format!("página {number}"),
         }
     }
+}
+
+/// Letra de columna de una hoja de cálculo a partir del índice (0 → `A`).
+pub(crate) fn column_letter(index: usize) -> String {
+    let mut index = index + 1;
+    let mut letters = String::new();
+    while index > 0 {
+        let remainder = (index - 1) % 26;
+        letters.insert(0, (b'A' + remainder as u8) as char);
+        index = (index - 1) / 26;
+    }
+    letters
 }
 
 /// Sección extraída de un documento, lista para trocear.
@@ -260,18 +283,38 @@ mod tests {
     #[test]
     fn etiqueta_de_ubicacion() {
         assert_eq!(Location::Lines { start: 1, end: 9 }.label(), "líneas 1-9");
-        assert_eq!(Location::Rows { start: 2, end: 5 }.label(), "filas 2-5");
         assert_eq!(
-            Location::Sheet {
-                name: "Ventas".to_string(),
-                start: 1,
-                end: 40,
+            Location::Rows {
+                sheet: Some("Ventas".to_string()),
+                columns: Some("A:D".to_string()),
+                first_row: 2,
+                last_row: 20,
+                prefix_lines: 1,
             }
             .label(),
-            "hoja Ventas, filas 1-40"
+            "hoja Ventas, A2:D20"
+        );
+        assert_eq!(
+            Location::Rows {
+                sheet: None,
+                columns: None,
+                first_row: 2,
+                last_row: 5,
+                prefix_lines: 1,
+            }
+            .label(),
+            "hoja 1, filas 2-5"
         );
         assert_eq!(Location::Slide(3).label(), "diapositiva 3");
         assert_eq!(Location::Page(7).label(), "página 7");
+    }
+
+    #[test]
+    fn letras_de_columna() {
+        assert_eq!(column_letter(0), "A");
+        assert_eq!(column_letter(25), "Z");
+        assert_eq!(column_letter(26), "AA");
+        assert_eq!(column_letter(27), "AB");
     }
 
     #[test]

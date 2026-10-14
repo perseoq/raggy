@@ -1,16 +1,14 @@
 //! Extracción de valores separados por comas (CSV).
 //!
-//! Cada fila se convierte en una línea `columna: valor` para que el contenido
-//! sea buscable, y las filas se agrupan en secciones de tamaño acotado. La
-//! cabecera se usa como encabezado de la sección.
+//! Como un CSV no tiene hojas, se cita como «hoja 1». La primera línea de cada
+//! sección mapea las columnas a sus letras (`A=nombre, B=edad`) y cada fila se
+//! emite con su número real (la cabecera es la fila 1). La ubicación cita
+//! `hoja 1, A2:C100`.
 
-use crate::{DocKind, ExtractError, ExtractedDocument, Location, Result, Section};
+use crate::{column_letter, DocKind, ExtractError, ExtractedDocument, Location, Result, Section};
 
 /// Número de filas de datos por sección.
 const ROWS_PER_SECTION: usize = 100;
-
-/// Nombre que se usa cuando una columna no tiene cabecera.
-const FALLBACK_COLUMN: &str = "columna";
 
 /// Extrae un CSV como una o varias secciones, una por lote de filas.
 pub fn extract(bytes: &[u8]) -> Result<ExtractedDocument> {
@@ -26,61 +24,95 @@ pub fn extract(bytes: &[u8]) -> Result<ExtractedDocument> {
         .map(|header| header.trim().to_string())
         .collect();
 
+    let columns = (!headers.is_empty())
+        .then(|| format!("{}:{}", column_letter(0), column_letter(headers.len() - 1)));
+    let header_line = headers
+        .iter()
+        .enumerate()
+        .filter(|(_, name)| !name.is_empty())
+        .map(|(index, name)| format!("{}={name}", column_letter(index)))
+        .collect::<Vec<_>>()
+        .join(", ");
+
     let mut sections = Vec::new();
     let mut batch: Vec<String> = Vec::new();
-    let mut batch_start = 1usize;
-    let mut row_number = 0usize;
+    let mut row_number = 1usize; // la cabecera es la fila 1
+    let mut first_row = 2usize;
+    let mut last_row = 2usize;
 
     for record in reader.records() {
         let record = record.map_err(parse_error)?;
         row_number += 1;
-        batch.push(format_row(&headers, record.iter()));
+        let line = row_line(record.iter());
+        if line.is_empty() {
+            continue;
+        }
+        if batch.is_empty() {
+            first_row = row_number;
+        }
+        last_row = row_number;
+        batch.push(format!("{row_number} | {line}"));
         if batch.len() >= ROWS_PER_SECTION {
-            sections.push(make_section(&headers, batch_start, row_number, &batch));
+            sections.push(make_section(
+                columns.clone(),
+                &header_line,
+                first_row,
+                last_row,
+                &batch,
+            ));
             batch.clear();
-            batch_start = row_number + 1;
         }
     }
 
     if !batch.is_empty() {
-        sections.push(make_section(&headers, batch_start, row_number, &batch));
+        sections.push(make_section(
+            columns,
+            &header_line,
+            first_row,
+            last_row,
+            &batch,
+        ));
     }
 
     Ok(ExtractedDocument::new(DocKind::Csv, sections))
 }
 
-/// Convierte una fila en `columna: valor; …`.
-fn format_row<'a>(headers: &[String], values: impl Iterator<Item = &'a str>) -> String {
-    let mut line = String::new();
-    for (index, value) in values.enumerate() {
-        if !line.is_empty() {
-            line.push_str("; ");
-        }
-        let column = headers
-            .get(index)
-            .map(String::as_str)
-            .filter(|name| !name.is_empty())
-            .unwrap_or(FALLBACK_COLUMN);
-        line.push_str(column);
-        line.push_str(": ");
-        line.push_str(value.trim());
+/// Une los valores de una fila con ` | `, sin celdas vacías al final.
+fn row_line<'a>(values: impl Iterator<Item = &'a str>) -> String {
+    let mut values: Vec<&str> = values.map(str::trim).collect();
+    while values.last().is_some_and(|value| value.is_empty()) {
+        values.pop();
     }
-    line
+    values.join(" | ")
 }
 
 /// Crea la sección de un lote de filas.
-fn make_section(headers: &[String], start: usize, end: usize, rows: &[String]) -> Section {
-    let heading = headers
-        .iter()
-        .filter(|header| !header.is_empty())
-        .cloned()
-        .collect::<Vec<_>>()
-        .join(" · ");
+fn make_section(
+    columns: Option<String>,
+    header: &str,
+    first_row: usize,
+    last_row: usize,
+    rows: &[String],
+) -> Section {
+    let prefix_lines = usize::from(!header.is_empty());
+    let mut text = String::new();
+    if !header.is_empty() {
+        text.push_str("Columnas: ");
+        text.push_str(header);
+        text.push('\n');
+    }
+    text.push_str(&rows.join("\n"));
 
     Section {
-        heading: (!heading.is_empty()).then_some(heading),
-        location: Location::Rows { start, end },
-        text: rows.join("\n"),
+        heading: None,
+        location: Location::Rows {
+            sheet: None,
+            columns,
+            first_row,
+            last_row,
+            prefix_lines,
+        },
+        text,
     }
 }
 
@@ -93,18 +125,28 @@ fn parse_error(error: ::csv::Error) -> ExtractError {
 mod tests {
     use super::*;
 
-    #[test]
-    fn convierte_cabecera_y_filas() {
-        let csv = "nombre,edad\nAna,30\nLuis,25\n";
-        let document = extract(csv.as_bytes()).expect("extrae");
+    fn csv_section(bytes: &[u8]) -> Section {
+        let document = extract(bytes).expect("extrae");
         assert_eq!(document.kind, DocKind::Csv);
-        assert_eq!(document.sections.len(), 1);
+        document.sections.into_iter().next().expect("sección")
+    }
 
-        let section = &document.sections[0];
-        assert_eq!(section.heading.as_deref(), Some("nombre · edad"));
-        assert_eq!(section.location, Location::Rows { start: 1, end: 2 });
-        assert!(section.text.contains("nombre: Ana; edad: 30"));
-        assert!(section.text.contains("nombre: Luis; edad: 25"));
+    #[test]
+    fn numera_filas_y_mapea_columnas() {
+        let section = csv_section(b"nombre,edad\nAna,30\nLuis,25\n");
+        assert!(section.text.contains("Columnas: A=nombre, B=edad"));
+        assert!(section.text.contains("2 | Ana | 30"));
+        assert!(section.text.contains("3 | Luis | 25"));
+        assert_eq!(
+            section.location,
+            Location::Rows {
+                sheet: None,
+                columns: Some("A:B".to_string()),
+                first_row: 2,
+                last_row: 3,
+                prefix_lines: 1,
+            }
+        );
     }
 
     #[test]
@@ -115,24 +157,22 @@ mod tests {
         }
         let document = extract(csv.as_bytes()).expect("extrae");
         assert_eq!(document.sections.len(), 3);
-        assert_eq!(
-            document.sections[0].location,
-            Location::Rows { start: 1, end: 100 }
-        );
-        assert_eq!(
-            document.sections[2].location,
+        match &document.sections[2].location {
             Location::Rows {
-                start: 201,
-                end: 250
+                first_row,
+                last_row,
+                ..
+            } => {
+                assert_eq!((*first_row, *last_row), (202, 251));
             }
-        );
+            other => panic!("ubicación inesperada: {other:?}"),
+        }
     }
 
     #[test]
     fn tolera_filas_con_menos_columnas() {
-        let csv = "a,b,c\n1,2\n";
-        let document = extract(csv.as_bytes()).expect("extrae");
-        assert!(document.sections[0].text.contains("a: 1; b: 2"));
+        let section = csv_section(b"a,b,c\n1,2\n");
+        assert!(section.text.contains("2 | 1 | 2"));
     }
 
     #[test]
