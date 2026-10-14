@@ -9,6 +9,14 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [1.0.27] - 2026-10-14
+
+### Corregido
+
+- Actualizado `rustls` a `0.23.46`, que corrige cuatro avisos de seguridad
+  (RUSTSEC-2026-0346 a RUSTSEC-2026-0349, publicados el 2026-10-14) y
+  restablece la auditoría de dependencias en la CI.
+
 ## [1.0.26] - 2026-10-14
 
 ### Añadido

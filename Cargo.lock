@@ -2662,7 +2662,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "raggy-app"
-version = "1.0.26"
+version = "1.0.27"
 dependencies = [
  "anyhow",
  "raggy-core",
@@ -2678,7 +2678,7 @@ dependencies = [
 
 [[package]]
 name = "raggy-core"
-version = "1.0.26"
+version = "1.0.27"
 dependencies = [
  "blake3",
  "chrono",
@@ -2699,7 +2699,7 @@ dependencies = [
 
 [[package]]
 name = "raggy-llm"
-version = "1.0.26"
+version = "1.0.27"
 dependencies = [
  "reqwest",
  "serde",
@@ -2709,7 +2709,7 @@ dependencies = [
 
 [[package]]
 name = "raggy-rag"
-version = "1.0.26"
+version = "1.0.27"
 dependencies = [
  "blake3",
  "pulldown-cmark",
@@ -2718,7 +2718,7 @@ dependencies = [
 
 [[package]]
 name = "raggy-storage"
-version = "1.0.26"
+version = "1.0.27"
 dependencies = [
  "chrono",
  "raggy-rag",
@@ -2732,7 +2732,7 @@ dependencies = [
 
 [[package]]
 name = "raggy-ui"
-version = "1.0.26"
+version = "1.0.27"
 dependencies = [
  "eframe",
  "egui",
@@ -3047,9 +3047,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.45"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "aws-lc-rs",
  "once_cell",
