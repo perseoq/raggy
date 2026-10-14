@@ -9,6 +9,14 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [1.0.28] - 2026-10-14
+
+### Cambiado
+
+- **Compositor del chat más alto**: la caja de texto pasa a tres líneas y el
+  botón iguala su altura, con menos relleno interior, de forma que casi alcanzan
+  los delimitadores superior e inferior del área y se ajustan a su ancho.
+
 ## [1.0.27] - 2026-10-14
 
 ### Corregido

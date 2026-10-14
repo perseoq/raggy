@@ -1952,7 +1952,7 @@ impl RaggyApp {
 
         egui::Panel::bottom("chat_composer").show(ui, |ui| {
             egui::Frame::NONE
-                .inner_margin(egui::Margin::symmetric(14, 12))
+                .inner_margin(egui::Margin::symmetric(8, 5))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         let button_width = 118.0;
@@ -1961,9 +1961,9 @@ impl RaggyApp {
 
                         let response = ui.add(
                             egui::TextEdit::multiline(&mut input)
-                                .desired_rows(2)
+                                .desired_rows(3)
                                 .desired_width(text_width)
-                                .margin(egui::Margin::symmetric(8, 8))
+                                .margin(egui::Margin::symmetric(8, 6))
                                 .hint_text("Escribe tu pregunta…"),
                         );
                         focused = response.has_focus();
