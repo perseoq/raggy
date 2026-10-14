@@ -5,6 +5,8 @@
 //! de código y ventanas de configuración, claves, artefactos y respaldo.
 
 pub mod app;
+mod icons;
+mod markdown;
 mod theme;
 
 use eframe::egui;

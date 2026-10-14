@@ -17,5 +17,7 @@ raggy-storage.workspace = true
 
 eframe.workspace = true
 egui.workspace = true
+egui_extras.workspace = true
+pulldown-cmark.workspace = true
 rfd.workspace = true
 tracing.workspace = true

@@ -9,6 +9,25 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [1.0.20] - 2026-10-14
+
+### Añadido
+
+- **Markdown en el chat**: las respuestas del asistente se renderizan con
+  encabezados, negritas, cursivas, código en línea, listas numeradas y con
+  viñetas, citas y reglas.
+- **Bloques de código como tarjetas**: se muestran con resaltado de sintaxis y,
+  en la esquina superior derecha, **iconos vectoriales SVG** para copiar,
+  ampliar la vista y descargar. El nombre del archivo sigue siendo editable en la
+  cabecera de la tarjeta.
+
+### Cambiado
+
+- El desplegable «Sistema» del tema alterna entre Novel y Tokyo Night según el
+  sistema operativo.
+- Nuevas dependencias: `egui_extras` (carga de SVG) y `pulldown-cmark` en la
+  interfaz.
+
 ## [1.0.19] - 2026-10-14
 
 ### Cambiado
@@ -87,7 +106,8 @@ Primera versión estable: cubre las 32 historias de usuario de `hu.md`.
   (arm64) y Windows, se empaquetan con sus checksums SHA-256 y se publican en
   GitHub Releases.
 
-[No publicado]: https://github.com/perseoq/raggy/compare/v1.0.19...HEAD
+[No publicado]: https://github.com/perseoq/raggy/compare/v1.0.20...HEAD
+[1.0.20]: https://github.com/perseoq/raggy/releases/tag/v1.0.20
 [1.0.19]: https://github.com/perseoq/raggy/releases/tag/v1.0.19
 [1.0.18]: https://github.com/perseoq/raggy/releases/tag/v1.0.18
 [1.0.0]: https://github.com/perseoq/raggy/releases/tag/v1.0.0

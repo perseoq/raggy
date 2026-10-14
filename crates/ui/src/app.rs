@@ -214,6 +214,7 @@ impl RaggyApp {
     /// Crea la aplicación, abre la base de datos, el indexador y el chat.
     pub fn new(ctx: &eframe::CreationContext<'_>, config: AppConfig, paths: AppPaths) -> Self {
         crate::theme::apply(ctx, config.theme);
+        egui_extras::install_image_loaders(&ctx.egui_ctx);
         let settings_draft = config.rag.clone();
         let secrets: Arc<dyn SecretStore> = Arc::new(SettingsStore::new(paths.settings_path()));
         let key_tab =
@@ -3033,6 +3034,8 @@ fn key_status_text(status: Option<&KeyStatus>) -> String {
 }
 
 /// Dibuja un mensaje como burbuja; a la derecha si es del usuario.
+///
+/// El texto del asistente se interpreta como Markdown.
 fn message_bubble(ui: &mut egui::Ui, content: &str, is_user: bool) {
     let dark = ui.visuals().dark_mode;
     let fill = if is_user {
@@ -3040,22 +3043,33 @@ fn message_bubble(ui: &mut egui::Ui, content: &str, is_user: bool) {
     } else {
         crate::theme::assistant_bubble(dark)
     };
-    let max_width = (ui.available_width() * 0.76).max(200.0);
-    let layout = if is_user {
-        egui::Layout::right_to_left(egui::Align::TOP)
-    } else {
-        egui::Layout::left_to_right(egui::Align::TOP)
-    };
 
-    ui.with_layout(layout, |ui| {
+    let full = ui.available_width();
+    let bubble = (full * 0.78).clamp(240.0, full.max(240.0));
+    let inner = (bubble - 30.0).max(180.0);
+
+    ui.horizontal(|ui| {
+        if is_user {
+            ui.add_space((full - bubble).max(0.0));
+        }
+
         egui::Frame::NONE
             .fill(fill)
             .stroke(egui::Stroke::new(1.0, crate::theme::bubble_stroke(dark)))
-            .inner_margin(egui::Margin::symmetric(13, 9))
+            .inner_margin(egui::Margin::symmetric(14, 10))
             .corner_radius(egui::CornerRadius::same(10))
             .show(ui, |ui| {
-                ui.set_max_width(max_width);
-                ui.add(egui::Label::new(content).wrap());
+                ui.set_width(inner);
+                // Vertical: si no, cada bloque de Markdown se colocaría a la
+                // derecha del anterior (el frame hereda el layout horizontal).
+                ui.vertical(|ui| {
+                    ui.set_width(inner);
+                    if is_user {
+                        ui.add(egui::Label::new(content).wrap());
+                    } else {
+                        crate::markdown::render(ui, content, inner);
+                    }
+                });
             });
     });
 }
@@ -3089,42 +3103,82 @@ fn render_code_blocks(
 
     for (index, block) in blocks.iter().enumerate() {
         let key = format!("{message_id}:{index}");
-        ui.group(|ui| {
-            ui.horizontal(|ui| {
-                ui.label("Archivo:");
-                let mut name = edits.get(&key).cloned().unwrap_or_else(|| {
-                    block
-                        .filename
-                        .clone()
-                        .unwrap_or_else(|| suggest_filename(block.language.as_deref(), index))
-                });
-                if ui
-                    .add(egui::TextEdit::singleline(&mut name).desired_width(240.0))
-                    .changed()
-                {
-                    pending_edits.push((key.clone(), name.clone()));
-                }
-                if let Some(language) = &block.language {
-                    ui.small(language.clone());
-                }
-                if ui.small_button("Vista previa").clicked() {
-                    pending_previews.push(key.clone());
-                }
-                if ui.small_button("Copiar").clicked() {
-                    actions.push(CentralAction::CopyCode(block.content.clone()));
-                }
-                if ui.small_button("Descargar").clicked() {
-                    actions.push(CentralAction::DownloadBlock {
-                        message_id: message_id.to_string(),
-                        block_index: index,
-                    });
-                }
-            });
+        let dark = ui.visuals().dark_mode;
+        let expanded = previews.get(&key).copied().unwrap_or(false);
+        let tint = ui.visuals().weak_text_color();
 
-            if previews.get(&key).copied().unwrap_or(false) {
+        egui::Frame::NONE
+            .fill(ui.visuals().extreme_bg_color)
+            .stroke(egui::Stroke::new(1.0, crate::theme::bubble_stroke(dark)))
+            .corner_radius(egui::CornerRadius::same(8))
+            .inner_margin(egui::Margin::symmetric(6, 6))
+            .show(ui, |ui| {
+                ui.set_width((ui.available_width() * 0.94).max(240.0));
+
+                ui.horizontal(|ui| {
+                    if let Some(language) = &block.language {
+                        ui.weak(language.clone());
+                        ui.separator();
+                    }
+
+                    let mut name = edits.get(&key).cloned().unwrap_or_else(|| {
+                        block
+                            .filename
+                            .clone()
+                            .unwrap_or_else(|| suggest_filename(block.language.as_deref(), index))
+                    });
+                    let edit = ui.add(
+                        egui::TextEdit::singleline(&mut name)
+                            .desired_width(190.0)
+                            .frame(egui::Frame::NONE),
+                    );
+                    if edit.changed() {
+                        pending_edits.push((key.clone(), name.clone()));
+                    }
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if crate::icons::icon_button(
+                            ui,
+                            crate::icons::download(),
+                            "Descargar",
+                            tint,
+                        )
+                        .clicked()
+                        {
+                            actions.push(CentralAction::DownloadBlock {
+                                message_id: message_id.to_string(),
+                                block_index: index,
+                            });
+                        }
+                        if crate::icons::icon_button(ui, crate::icons::copy(), "Copiar", tint)
+                            .clicked()
+                        {
+                            actions.push(CentralAction::CopyCode(block.content.clone()));
+                        }
+                        let eye_tint = if expanded {
+                            crate::theme::accent(dark)
+                        } else {
+                            tint
+                        };
+                        if crate::icons::icon_button(
+                            ui,
+                            crate::icons::eye(),
+                            if expanded { "Ver menos" } else { "Ver todo" },
+                            eye_tint,
+                        )
+                        .clicked()
+                        {
+                            pending_previews.push(key.clone());
+                        }
+                    });
+                });
+
+                ui.separator();
+
+                let max_height = if expanded { 420.0 } else { 148.0 };
                 egui::ScrollArea::both()
                     .id_salt(format!("preview_{key}"))
-                    .max_height(360.0)
+                    .max_height(max_height)
                     .show(ui, |ui| {
                         ui.add(egui::Label::new(highlight_job(
                             ui,
@@ -3132,14 +3186,7 @@ fn render_code_blocks(
                             &block.content,
                         )));
                     });
-            } else {
-                ui.small(format!(
-                    "Líneas {} · {} caracteres",
-                    block.start_line,
-                    block.content.chars().count()
-                ));
-            }
-        });
+            });
         ui.add_space(4.0);
     }
 }
