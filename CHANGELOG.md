@@ -9,6 +9,16 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [1.0.25] - 2026-10-14
+
+### Cambiado
+
+- **Cabecera de la sesión alineada**: el título, los desplegables de
+  proveedor, modelo y respaldo, y los botones «Exportar sesión» y «Artefactos»
+  comparten ahora una misma altura de fila, de modo que quedan centrados en la
+  misma línea, con relleno simétrico respecto al borde. El botón «Configurar»
+  (cuando falta la API Key) pasa a tamaño normal para no desentonar.
+
 ## [1.0.24] - 2026-10-14
 
 ### Cambiado

@@ -23,6 +23,12 @@ use raggy_storage::{Artifact, Document, Folder, Message, Session, Storage};
 /// Tiempo de espera antes de reindexar tras un cambio detectado en disco.
 const REINDEX_DEBOUNCE: Duration = Duration::from_millis(1200);
 
+/// Altura uniforme de los controles de la cabecera de la sesión de chat.
+///
+/// Al fijarla antes de crear la fila, el título, los desplegables, los
+/// separadores y los botones comparten la misma altura y quedan alineados.
+const SESSION_HEADER_HEIGHT: f32 = 32.0;
+
 /// Estado de una clave de API en la interfaz (HU-23, HU-24).
 #[derive(Clone)]
 enum KeyStatus {
@@ -1840,95 +1846,102 @@ impl RaggyApp {
         let dark = ui.visuals().dark_mode;
 
         // --- cabecera: sesión, proveedor, modelo, respaldo y acciones ---
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.heading(&session.title);
-            ui.separator();
+        ui.add_space(6.0);
+        ui.scope(|ui| {
+            // Todos los controles de la fila comparten altura para quedar centrados
+            // en la misma línea (HU de sesión; el título, los desplegables y los
+            // botones dejan de bailar entre sí).
+            ui.spacing_mut().interact_size.y = SESSION_HEADER_HEIGHT;
+            ui.horizontal(|ui| {
+                ui.heading(&session.title);
+                ui.separator();
 
-            let mut selected_provider = provider;
-            egui::ComboBox::from_id_salt("provider_selector")
-                .selected_text(provider.display_name())
-                .show_ui(ui, |ui| {
-                    for candidate in ProviderId::ALL {
-                        ui.selectable_value(
-                            &mut selected_provider,
-                            candidate,
-                            candidate.display_name(),
-                        );
-                    }
-                });
-
-            let mut selected_model = session.model.clone();
-            egui::ComboBox::from_id_salt("model_selector")
-                .selected_text(session.model.clone())
-                .show_ui(ui, |ui| {
-                    for candidate in selected_provider.models() {
-                        ui.selectable_value(
-                            &mut selected_model,
-                            (*candidate).to_string(),
-                            *candidate,
-                        );
-                    }
-                });
-
-            if selected_provider != provider || selected_model != session.model {
-                actions.push(CentralAction::UpdateModel {
-                    provider: selected_provider,
-                    model: selected_model,
-                });
-            }
-
-            ui.separator();
-            let mut selected_fallback = session
-                .fallback_provider
-                .as_deref()
-                .and_then(ProviderId::from_key);
-            egui::ComboBox::from_id_salt("fallback_selector")
-                .selected_text(match selected_fallback {
-                    Some(fallback) => format!("Respaldo: {}", fallback.display_name()),
-                    None => "Sin respaldo".to_string(),
-                })
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut selected_fallback, None, "Sin respaldo");
-                    for candidate in ProviderId::ALL {
-                        if candidate != provider {
+                let mut selected_provider = provider;
+                egui::ComboBox::from_id_salt("provider_selector")
+                    .selected_text(provider.display_name())
+                    .show_ui(ui, |ui| {
+                        for candidate in ProviderId::ALL {
                             ui.selectable_value(
-                                &mut selected_fallback,
-                                Some(candidate),
+                                &mut selected_provider,
+                                candidate,
                                 candidate.display_name(),
                             );
                         }
+                    });
+
+                let mut selected_model = session.model.clone();
+                egui::ComboBox::from_id_salt("model_selector")
+                    .selected_text(session.model.clone())
+                    .show_ui(ui, |ui| {
+                        for candidate in selected_provider.models() {
+                            ui.selectable_value(
+                                &mut selected_model,
+                                (*candidate).to_string(),
+                                *candidate,
+                            );
+                        }
+                    });
+
+                if selected_provider != provider || selected_model != session.model {
+                    actions.push(CentralAction::UpdateModel {
+                        provider: selected_provider,
+                        model: selected_model,
+                    });
+                }
+
+                ui.separator();
+                let mut selected_fallback = session
+                    .fallback_provider
+                    .as_deref()
+                    .and_then(ProviderId::from_key);
+                egui::ComboBox::from_id_salt("fallback_selector")
+                    .selected_text(match selected_fallback {
+                        Some(fallback) => format!("Respaldo: {}", fallback.display_name()),
+                        None => "Sin respaldo".to_string(),
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut selected_fallback, None, "Sin respaldo");
+                        for candidate in ProviderId::ALL {
+                            if candidate != provider {
+                                ui.selectable_value(
+                                    &mut selected_fallback,
+                                    Some(candidate),
+                                    candidate.display_name(),
+                                );
+                            }
+                        }
+                    });
+                let previous_fallback = session
+                    .fallback_provider
+                    .as_deref()
+                    .and_then(ProviderId::from_key);
+                if selected_fallback != previous_fallback {
+                    actions.push(CentralAction::UpdateFallback {
+                        provider: selected_fallback,
+                    });
+                }
+
+                if !self.provider_ready(provider) {
+                    ui.colored_label(
+                        crate::theme::warning_color(dark),
+                        format!("Sin API Key ({})", provider.api_key_env()),
+                    );
+                    if ui.button("Configurar").clicked() {
+                        actions.push(CentralAction::OpenKeys);
+                    }
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Exportar sesión").clicked() {
+                        actions.push(CentralAction::ExportSession);
+                    }
+                    if ui.button("Artefactos").clicked() {
+                        self.artifacts_open = true;
                     }
                 });
-            let previous_fallback = session
-                .fallback_provider
-                .as_deref()
-                .and_then(ProviderId::from_key);
-            if selected_fallback != previous_fallback {
-                actions.push(CentralAction::UpdateFallback {
-                    provider: selected_fallback,
-                });
-            }
-
-            if !self.provider_ready(provider) {
-                ui.colored_label(
-                    crate::theme::warning_color(dark),
-                    format!("Sin API Key ({})", provider.api_key_env()),
-                );
-                if ui.small_button("Configurar").clicked() {
-                    actions.push(CentralAction::OpenKeys);
-                }
-            }
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Exportar sesión").clicked() {
-                    actions.push(CentralAction::ExportSession);
-                }
-                if ui.button("Artefactos").clicked() {
-                    self.artifacts_open = true;
-                }
             });
         });
+        ui.add_space(6.0);
         ui.separator();
 
         // --- compositor fijo en la parte inferior ---
