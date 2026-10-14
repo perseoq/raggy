@@ -28,14 +28,20 @@ Cada cambio en `main` se publica como una versión. Sigue estos pasos en orden:
    `### Corregido`, `### Eliminado`). Este es el registro que se conserva por
    versión; descríbelo de forma concreta y en español.
 2. **Sube la versión** del workspace en `Cargo.toml`
-   (`[workspace.package] version`) a `1.0.<n>`, donde `<n>` es el número del
-   commit que estás creando en `main` (`git rev-list --count HEAD` + 1). Los
-   crates heredan la versión con `version.workspace = true`; `Cargo.lock` se
+   (`[workspace.package] version`) según el tipo de cambio:
+   - **Cambio menor** (corrección, ajuste, mejora pequeña): incrementa el último
+     número. Ejemplo: `1.0.28` → `1.0.29` → `1.0.30`.
+   - **Cambio mayor** (arquitectura, funcionalidad importante o ruptura de
+     compatibilidad): incrementa el primer número y reinicia el resto a cero.
+     Ejemplo: `1.0.29` → `2.0.0`, y más adelante `2.0.x` → `3.0.0`.
+
+   En caso de duda sobre si un cambio es mayor, trátalo como menor y consulta.
+   Los crates heredan la versión con `version.workspace = true`; `Cargo.lock` se
    regenera al compilar y también se versiona.
-3. Mueve la entrada a `## [1.0.<n>] - <AAAA-MM-DD>` (fecha actual) y deja
-   `## [No publicado]` vacía en la parte superior.
+3. Mueve la entrada a `## [<versión>] - <AAAA-MM-DD>` (la versión resultante y
+   la fecha actual) y deja `## [No publicado]` vacía en la parte superior.
 4. Ejecuta la comprobación completa (formato, Clippy, pruebas y `build --release`).
-5. **Commit** en español: asunto conciso terminado en `; versión 1.0.<n>`, y en
+5. **Commit** en español: asunto conciso terminado en `; versión <versión>`, y en
    el cuerpo el detalle de los cambios.
 6. `git push origin main`.
 7. **Tag y release**: crea un tag anotado y súbelo. Empujar el tag dispara el
@@ -43,8 +49,8 @@ Cada cambio en `main` se publica como una versión. Sigue estos pasos en orden:
    Release con los binarios y sus checksums:
 
    ```bash
-   git tag -a v1.0.<n> -m "Raggy Desktop 1.0.<n>"
-   git push origin v1.0.<n>
+   git tag -a v<versión> -m "Raggy Desktop <versión>"
+   git push origin v<versión>
    ```
 
 8. **Verifica** que CI y Release terminan bien:
@@ -53,6 +59,9 @@ Cada cambio en `main` se publica como una versión. Sigue estos pasos en orden:
    gh run list --limit 5
    gh run watch <id-del-run> --exit-status
    ```
+
+   Si la auditoría de dependencias (RustSec) falla, actualiza la dependencia
+   afectada (`cargo update -p <crate>`) dentro del mismo flujo.
 
 ## Convenciones de código
 
@@ -64,5 +73,5 @@ Cada cambio en `main` se publica como una versión. Sigue estos pasos en orden:
   `settings.json` (permisos `0600` en Unix) o en variables de entorno. El tipo
   `Secret` redacta su valor en `Debug`/`Display`.
 - Comenta el *porqué*, no el *qué*. Mantén las citas a las HU.
-- Los cambios solo de documentación también siguen este flujo (versión + tag),
-  para conservar la correspondencia `1.0.<n>` ↔ commit `<n>` de `main`.
+- Los cambios solo de documentación o proceso también siguen este flujo
+  (versión + tag) como cambios menores.

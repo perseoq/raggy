@@ -9,6 +9,19 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [1.0.29] - 2026-10-14
+
+### Añadido
+
+- `AGENTS.md`: regla de versionado por tipo de cambio; los **cambios mayores**
+  saltan a `2.0.0`, `3.0.0`… y los **menores** solo suben el último número.
+
+### Cambiado
+
+- **Compositor del chat centrado en vertical**: la caja de texto y el botón
+  comparten una altura fija y un relleno simétrico, de modo que quedan centrados
+  entre los delimitadores superior e inferior y ocupan todo el ancho del área.
+
 ## [1.0.28] - 2026-10-14
 
 ### Cambiado

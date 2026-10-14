@@ -29,6 +29,9 @@ const REINDEX_DEBOUNCE: Duration = Duration::from_millis(1200);
 /// separadores y los botones comparten la misma altura y quedan alineados.
 const SESSION_HEADER_HEIGHT: f32 = 32.0;
 
+/// Altura de la caja de texto y del botón del compositor del chat.
+const COMPOSER_INPUT_HEIGHT: f32 = 76.0;
+
 /// Estado de una clave de API en la interfaz (HU-23, HU-24).
 #[derive(Clone)]
 enum KeyStatus {
@@ -1951,8 +1954,10 @@ impl RaggyApp {
         let mut focused = false;
 
         egui::Panel::bottom("chat_composer").show(ui, |ui| {
+            // Relleno simétrico: la fila (caja + botón) queda centrada en altura
+            // entre los delimitadores superior e inferior del área.
             egui::Frame::NONE
-                .inner_margin(egui::Margin::symmetric(8, 5))
+                .inner_margin(egui::Margin::symmetric(8, 8))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         let button_width = 118.0;
@@ -1961,20 +1966,19 @@ impl RaggyApp {
 
                         let response = ui.add(
                             egui::TextEdit::multiline(&mut input)
-                                .desired_rows(3)
                                 .desired_width(text_width)
+                                .min_size(egui::vec2(text_width, COMPOSER_INPUT_HEIGHT))
                                 .margin(egui::Margin::symmetric(8, 6))
                                 .hint_text("Escribe tu pregunta…"),
                         );
                         focused = response.has_focus();
-                        let height = response.rect.height();
 
                         let label = if is_streaming { "Detener" } else { "Enviar" };
                         let button = if is_streaming {
                             egui::Button::new(egui::RichText::new(label).size(15.0))
                                 .fill(crate::theme::secondary_button(dark))
                                 .corner_radius(egui::CornerRadius::same(8))
-                                .min_size(egui::vec2(button_width, height))
+                                .min_size(egui::vec2(button_width, COMPOSER_INPUT_HEIGHT))
                         } else {
                             egui::Button::new(
                                 egui::RichText::new(label)
@@ -1983,7 +1987,7 @@ impl RaggyApp {
                             )
                             .fill(crate::theme::accent(dark))
                             .corner_radius(egui::CornerRadius::same(8))
-                            .min_size(egui::vec2(button_width, height))
+                            .min_size(egui::vec2(button_width, COMPOSER_INPUT_HEIGHT))
                         };
                         if ui.add(button).clicked() {
                             if is_streaming {
