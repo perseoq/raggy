@@ -23,6 +23,13 @@ pub struct OpenAiCompatibleProvider {
     client: Client,
 }
 
+impl Drop for OpenAiCompatibleProvider {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.api_key.zeroize();
+    }
+}
+
 impl OpenAiCompatibleProvider {
     /// Crea el adaptador para el proveedor indicado.
     pub fn new(id: ProviderId, api_key: String) -> Result<Self, ProviderError> {

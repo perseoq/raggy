@@ -26,7 +26,10 @@ pub use backup::{export_backup, import_backup, BackupSummary};
 pub use chat::{
     compose_request, context_from_retrieved, ChatCommand, ChatEvent, ChatWorker, ProviderFactory,
 };
-pub use config::{AppConfig, IngestConfig, ModelConfig, RagConfig, Theme, DEFAULT_TEMPERATURE};
+pub use config::{
+    AppConfig, IngestConfig, ModelConfig, RagConfig, Theme, DEFAULT_TEMPERATURE,
+    PRIVACY_NOTICE_VERSION,
+};
 pub use error::{CoreError, Result};
 pub use export::{session_markdown, write_session_export};
 pub use index::{

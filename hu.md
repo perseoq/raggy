@@ -408,7 +408,9 @@ documentos soportados,
 **para** proteger mi documentación sensible.
 
 **Criterios de aceptación:**
-- Solo se envían al proveedor los fragmentos recuperados necesarios para la consulta.
+- Se envían al proveedor elegido la pregunta actual, los fragmentos recuperados
+  y el historial previo de la conversación; al modificar un artefacto, también
+  puede enviarse su contenido.
 - No hay telemetría por defecto.
 - Existe un aviso claro en la primera ejecución explicando qué se envía y a dónde.
 

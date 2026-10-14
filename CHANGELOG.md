@@ -4,10 +4,21 @@ Todos los cambios relevantes de este proyecto se documentan aquí.
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/)
 y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
-> **Convención del proyecto:** la versión y la etiqueta siguen el folio del
-> commit, `1.0.<n>` y `v1.0.<n>`, donde `n` es el número del commit en `main`.
+> **Convención actual:** se usa SemVer y las publicaciones de un programa de
+> varias fases se agrupan en la versión acordada para su cierre. Las entradas
+> `1.0.x` conservan la convención histórica de folio de commit.
 
 ## [No publicado]
+
+### Corregido
+
+- **Fase 1 de correcciones 2.2.0 — secretos y aviso de privacidad**: guardar o
+  cerrar preferencias ya conserva las claves más recientes del almacén y no
+  resucita las eliminadas; `SettingsStore` serializa las modificaciones de
+  claves; se zeroizan copias temporales y las claves de los proveedores al
+  liberar los clientes. El aviso de privacidad vuelve a mostrarse cuando cambia
+  su versión e informa del historial que se envía al proveedor y del
+  almacenamiento no cifrado de las claves.
 
 ## [2.1.0] - 2026-10-14
 
@@ -252,7 +263,9 @@ Primera versión estable: cubre las 32 historias de usuario de `hu.md`.
   (arm64) y Windows, se empaquetan con sus checksums SHA-256 y se publican en
   GitHub Releases.
 
-[No publicado]: https://github.com/perseoq/raggy/compare/v1.0.24...HEAD
+[No publicado]: https://github.com/perseoq/raggy/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/perseoq/raggy/releases/tag/v2.1.0
+[2.0.0]: https://github.com/perseoq/raggy/releases/tag/v2.0.0
 [1.0.24]: https://github.com/perseoq/raggy/releases/tag/v1.0.24
 [1.0.23]: https://github.com/perseoq/raggy/releases/tag/v1.0.23
 [1.0.22]: https://github.com/perseoq/raggy/releases/tag/v1.0.22

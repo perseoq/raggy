@@ -49,7 +49,7 @@ impl ProviderId {
         }
     }
 
-    /// Variable de entorno usada como alternativa al llavero del sistema.
+    /// Variable de entorno usada como alternativa a guardar la clave en settings.json.
     pub fn api_key_env(self) -> &'static str {
         match self {
             ProviderId::OpenAi => "OPENAI_API_KEY",

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use eframe::egui;
+use zeroize::Zeroize;
 
 use raggy_core::chat::{compose_request, context_from_retrieved};
 use raggy_core::index::{IndexEvent, IndexOptions, IndexPhase, IndexWorker};
@@ -38,7 +39,7 @@ const COMPOSER_INPUT_HEIGHT: f32 = 76.0;
 enum KeyStatus {
     /// No hay clave configurada.
     Missing,
-    /// Clave guardada en el llavero del sistema (enmascarada).
+    /// Clave guardada en `settings.json` (enmascarada).
     Stored { masked: String },
     /// Clave tomada de una variable de entorno.
     Environment { env_var: &'static str },
@@ -335,9 +336,11 @@ impl RaggyApp {
     fn refresh_keys(&mut self) {
         for provider in ProviderId::ALL {
             let status = match self.secrets.get(provider) {
-                Ok(Some(secret)) => KeyStatus::Stored {
-                    masked: raggy_core::secrets::mask(&secret),
-                },
+                Ok(Some(mut secret)) => {
+                    let masked = raggy_core::secrets::mask(&secret);
+                    secret.zeroize();
+                    KeyStatus::Stored { masked }
+                }
                 Ok(None) => {
                     if raggy_llm::api_key(provider).is_some() {
                         KeyStatus::Environment {
@@ -351,6 +354,17 @@ impl RaggyApp {
             };
             self.key_status.insert(provider, status);
         }
+    }
+
+    /// Borra las copias de claves que mantiene la interfaz antes de salir.
+    fn wipe_secret_copies(&mut self) {
+        for secret in self.config.api_keys.values_mut() {
+            secret.zeroize();
+        }
+        for input in self.key_inputs.values_mut() {
+            input.zeroize();
+        }
+        self.key_inputs.clear();
     }
 
     fn save_key(&mut self, provider: ProviderId) {
@@ -368,12 +382,21 @@ impl RaggyApp {
             return;
         }
 
-        match self.secrets.set(provider, &secret) {
+        let secret = raggy_core::Secret::new(secret);
+        match self.secrets.set(provider, secret.expose()) {
             Ok(()) => {
-                self.key_inputs.remove(&provider);
+                if let Some(previous) = self.config.api_keys.get_mut(provider.key()) {
+                    previous.zeroize();
+                }
+                self.config
+                    .api_keys
+                    .insert(provider.key().to_string(), secret.expose().to_string());
+                if let Some(mut input) = self.key_inputs.remove(&provider) {
+                    input.zeroize();
+                }
                 self.refresh_keys();
                 self.status = format!(
-                    "Clave de {} guardada en el llavero.",
+                    "Clave de {} guardada en settings.json.",
                     provider.display_name()
                 );
             }
@@ -387,6 +410,9 @@ impl RaggyApp {
     fn delete_key(&mut self, provider: ProviderId) {
         match self.secrets.delete(provider) {
             Ok(()) => {
+                if let Some(mut previous) = self.config.api_keys.remove(provider.key()) {
+                    previous.zeroize();
+                }
                 self.refresh_keys();
                 self.status = format!("Clave de {} eliminada.", provider.display_name());
             }
@@ -410,11 +436,10 @@ impl RaggyApp {
             return;
         };
 
-        let key = secret.expose().to_string();
         self.key_status.insert(provider, KeyStatus::Testing);
         let sender = self.test_tx.clone();
         std::thread::spawn(move || {
-            let result = raggy_llm::check_connection_with_key(provider, &key)
+            let result = raggy_llm::check_connection_with_key(provider, secret.expose())
                 .map_err(|error| error.to_string());
             let _ = sender.send((provider, result));
         });
@@ -2870,6 +2895,9 @@ impl RaggyApp {
             candidate.ingest.ocr_languages = parse_languages(&self.settings_languages);
             match candidate.validate() {
                 Ok(()) => {
+                    for secret in self.config.api_keys.values_mut() {
+                        secret.zeroize();
+                    }
                     self.config = candidate;
                     match self.config.save(&self.paths.settings_path()) {
                         Ok(()) => {
@@ -3040,7 +3068,7 @@ impl RaggyApp {
 
     /// Aviso de primera ejecución sobre qué se envía y a dónde (HU-30).
     fn notice_window(&mut self, ctx: &egui::Context) {
-        if self.config.data_notice_acknowledged {
+        if self.config.privacy_notice_version >= raggy_core::PRIVACY_NOTICE_VERSION {
             return;
         }
 
@@ -3057,11 +3085,15 @@ impl RaggyApp {
                 );
                 ui.add_space(4.0);
                 ui.label(
-                    "Al usar el chat, solo se envían al proveedor que elijas los fragmentos \
-                     recuperados necesarios y tu pregunta. No hay telemetría ni otros envíos.",
+                    "Al usar el chat, se envían al proveedor que elijas tu pregunta, los \
+                     fragmentos recuperados y el historial previo de la conversación. Si pides \
+                     modificar un artefacto, también puede enviarse su contenido. No hay telemetría.",
                 );
                 ui.add_space(4.0);
-                ui.label("Tus claves de API se guardan cifradas en el llavero del sistema.");
+                ui.label(
+                    "Las claves de API se guardan en texto claro en settings.json (permisos \
+                     restringidos en Unix); no se cifran ni se guardan en el llavero del sistema.",
+                );
                 ui.add_space(8.0);
                 if ui.button("Entendido").clicked() {
                     accept = true;
@@ -3069,7 +3101,7 @@ impl RaggyApp {
             });
 
         if accept {
-            self.config.data_notice_acknowledged = true;
+            self.config.privacy_notice_version = raggy_core::PRIVACY_NOTICE_VERSION;
             if let Err(error) = self.config.save(&self.paths.settings_path()) {
                 tracing::warn!("no se pudo guardar el aviso de privacidad: {error}");
             }
@@ -3302,6 +3334,7 @@ impl eframe::App for RaggyApp {
         if let Err(error) = self.config.save(&self.paths.settings_path()) {
             tracing::warn!("no se pudo guardar la configuración al salir: {error}");
         }
+        self.wipe_secret_copies();
     }
 }
 

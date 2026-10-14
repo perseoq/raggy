@@ -8,11 +8,15 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroize;
 
 use crate::error::{CoreError, Result};
 
 /// Temperatura por defecto, fijada en 0.1 para minimizar alucinaciones (HU-13).
 pub const DEFAULT_TEMPERATURE: f32 = 0.1;
+
+/// Versión del aviso de privacidad que debe aceptar el usuario.
+pub const PRIVACY_NOTICE_VERSION: u32 = 2;
 
 /// Tema visual de la interfaz (HU-26).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -152,8 +156,8 @@ pub struct AppConfig {
     pub model: ModelConfig,
     /// Parámetros de ingesta de documentos y OCR.
     pub ingest: IngestConfig,
-    /// Si el usuario ya ha visto el aviso de privacidad (HU-30).
-    pub data_notice_acknowledged: bool,
+    /// Versión del aviso de privacidad que el usuario ya aceptó (HU-30).
+    pub privacy_notice_version: u32,
     /// Último tamaño de la ventana en píxeles lógicos, para restaurarlo.
     pub window_size: Option<[f32; 2]>,
     /// Directorio de datos alternativo; si falta, se usa la carpeta base.
@@ -170,7 +174,7 @@ impl Default for AppConfig {
             rag: RagConfig::default(),
             model: ModelConfig::default(),
             ingest: IngestConfig::default(),
-            data_notice_acknowledged: false,
+            privacy_notice_version: 0,
             window_size: None,
             data_dir: None,
             api_keys: HashMap::new(),
@@ -181,11 +185,13 @@ impl Default for AppConfig {
 impl AppConfig {
     /// Carga la configuración desde `settings.json`.
     pub fn load(path: &Path) -> Result<Self> {
-        let raw = std::fs::read_to_string(path).map_err(|source| CoreError::Io {
+        let mut raw = std::fs::read_to_string(path).map_err(|source| CoreError::Io {
             path: path.to_path_buf(),
             source,
         })?;
-        let config: Self = serde_json::from_str(&raw)?;
+        let parsed = serde_json::from_str(&raw);
+        raw.zeroize();
+        let config: Self = parsed?;
         config.validate()?;
         Ok(config)
     }
@@ -218,11 +224,45 @@ impl AppConfig {
                 source,
             })?;
         }
-        let serialized = serde_json::to_string_pretty(self)?;
-        std::fs::write(path, serialized).map_err(|source| CoreError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
+        let mut document = serde_json::to_value(self)?;
+
+        // Las claves se mantienen en un almacén separado. Al guardar cualquier
+        // otra preferencia, conserva el campo más reciente del disco en vez de
+        // sobrescribirlo con la copia potencialmente antigua de AppConfig.
+        if path.is_file() {
+            if let Ok(mut raw) = std::fs::read_to_string(path) {
+                let existing = serde_json::from_str::<serde_json::Value>(&raw).ok();
+                raw.zeroize();
+                zeroize_api_keys(&mut document);
+                match existing {
+                    Some(serde_json::Value::Object(mut map)) => {
+                        if let Some(api_keys) = map.remove("api_keys") {
+                            if let serde_json::Value::Object(output) = &mut document {
+                                output.insert("api_keys".to_string(), api_keys);
+                            }
+                        } else if let serde_json::Value::Object(output) = &mut document {
+                            output.remove("api_keys");
+                        }
+                        zeroize_api_keys(&mut serde_json::Value::Object(map));
+                    }
+                    _ => {
+                        if let serde_json::Value::Object(output) = &mut document {
+                            output.remove("api_keys");
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut serialized = serde_json::to_string_pretty(&document)?;
+        zeroize_api_keys(&mut document);
+        let write_result =
+            std::fs::write(path, serialized.as_bytes()).map_err(|source| CoreError::Io {
+                path: path.to_path_buf(),
+                source,
+            });
+        serialized.zeroize();
+        write_result?;
         restrict_permissions(path);
         Ok(())
     }
@@ -274,6 +314,20 @@ impl AppConfig {
             ));
         }
         Ok(())
+    }
+}
+
+/// Zeroiza los valores del campo `api_keys` de un documento JSON mutable.
+fn zeroize_api_keys(document: &mut serde_json::Value) {
+    if let Some(keys) = document
+        .get_mut("api_keys")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for value in keys.values_mut() {
+            if let serde_json::Value::String(secret) = value {
+                secret.zeroize();
+            }
+        }
     }
 }
 
@@ -344,8 +398,17 @@ mod tests {
     }
 
     #[test]
-    fn el_aviso_de_datos_empieza_pendiente() {
-        assert!(!AppConfig::default().data_notice_acknowledged);
+    fn el_aviso_de_privacidad_empieza_pendiente() {
+        assert_eq!(AppConfig::default().privacy_notice_version, 0);
+    }
+
+    #[test]
+    fn configuracion_antigua_vuelve_a_mostrar_el_aviso_actualizado() {
+        let old: AppConfig =
+            serde_json::from_str(r#"{"data_notice_acknowledged":true,"theme":"dark"}"#)
+                .expect("configuración anterior compatible");
+        assert_eq!(old.theme, Theme::Dark);
+        assert_eq!(old.privacy_notice_version, 0);
     }
 
     #[test]
@@ -373,6 +436,59 @@ mod tests {
             loaded.api_keys.get("deepseek").map(String::as_str),
             Some("clave-de-prueba")
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn guardar_preferencias_conserva_las_claves_mas_recientes_del_almacen() {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("raggy-config-keys-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("crea carpeta");
+        let path = dir.join("settings.json");
+
+        std::fs::write(
+            &path,
+            r#"{"theme":"dark","api_keys":{"deepseek":"clave-actual"}}"#,
+        )
+        .expect("prepara configuración con clave reciente");
+
+        let mut stale = AppConfig::default();
+        stale
+            .api_keys
+            .insert("deepseek".to_string(), "clave-antigua".to_string());
+        stale.theme = Theme::Light;
+        stale.save(&path).expect("guarda preferencias");
+
+        let loaded = AppConfig::load(&path).expect("recarga");
+        assert_eq!(loaded.theme, Theme::Light);
+        assert_eq!(
+            loaded.api_keys.get("deepseek").map(String::as_str),
+            Some("clave-actual"),
+            "guardar preferencias no debe restaurar una copia antigua de la clave"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn guardar_preferencias_no_resucita_una_clave_eliminada() {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("raggy-config-deleted-key-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("crea carpeta");
+        let path = dir.join("settings.json");
+
+        std::fs::write(&path, r#"{"api_keys":{}}"#).expect("clave ya eliminada");
+        let mut stale = AppConfig::default();
+        stale
+            .api_keys
+            .insert("openai".to_string(), "clave-eliminada".to_string());
+        stale.save(&path).expect("guarda preferencias");
+
+        let loaded = AppConfig::load(&path).expect("recarga");
+        assert!(!loaded.api_keys.contains_key("openai"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

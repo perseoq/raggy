@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use raggy_llm::ProviderId;
+use zeroize::Zeroize;
 
 /// Error del almacén de secretos.
 #[derive(Debug, thiserror::Error)]
@@ -95,33 +96,37 @@ impl SettingsStore {
             lock: Mutex::new(()),
         }
     }
-
-    fn read_keys(&self) -> Result<HashMap<String, String>> {
-        let _guard = self.lock.lock().map_err(|_| locked())?;
-        Ok(read_keys(&self.path))
-    }
-
-    fn write_keys(&self, keys: &HashMap<String, String>) -> Result<()> {
-        let _guard = self.lock.lock().map_err(|_| locked())?;
-        write_keys(&self.path, keys)
-    }
 }
 
 impl SecretStore for SettingsStore {
     fn get(&self, provider: ProviderId) -> Result<Option<String>> {
-        Ok(self.read_keys()?.get(provider.key()).cloned())
+        let _guard = self.lock.lock().map_err(|_| locked())?;
+        let mut keys = read_keys(&self.path);
+        let result = keys.remove(provider.key());
+        zeroize_values(&mut keys);
+        Ok(result)
     }
 
     fn set(&self, provider: ProviderId, secret: &str) -> Result<()> {
-        let mut keys = self.read_keys()?;
-        keys.insert(provider.key().to_string(), secret.to_string());
-        self.write_keys(&keys)
+        let _guard = self.lock.lock().map_err(|_| locked())?;
+        let mut keys = read_keys(&self.path);
+        if let Some(mut previous) = keys.insert(provider.key().to_string(), secret.to_string()) {
+            previous.zeroize();
+        }
+        let result = write_keys(&self.path, &keys);
+        zeroize_values(&mut keys);
+        result
     }
 
     fn delete(&self, provider: ProviderId) -> Result<()> {
-        let mut keys = self.read_keys()?;
-        keys.remove(provider.key());
-        self.write_keys(&keys)
+        let _guard = self.lock.lock().map_err(|_| locked())?;
+        let mut keys = read_keys(&self.path);
+        if let Some(mut previous) = keys.remove(provider.key()) {
+            previous.zeroize();
+        }
+        let result = write_keys(&self.path, &keys);
+        zeroize_values(&mut keys);
+        result
     }
 }
 
@@ -139,39 +144,60 @@ impl SecretStore for MemoryStore {
 
     fn set(&self, provider: ProviderId, secret: &str) -> Result<()> {
         let mut secrets = self.secrets.lock().map_err(|_| locked())?;
-        secrets.insert(provider.key(), secret.to_string());
+        if let Some(mut previous) = secrets.insert(provider.key(), secret.to_string()) {
+            previous.zeroize();
+        }
         Ok(())
     }
 
     fn delete(&self, provider: ProviderId) -> Result<()> {
         let mut secrets = self.secrets.lock().map_err(|_| locked())?;
-        secrets.remove(provider.key());
+        if let Some(mut previous) = secrets.remove(provider.key()) {
+            previous.zeroize();
+        }
         Ok(())
+    }
+}
+
+impl Drop for MemoryStore {
+    fn drop(&mut self) {
+        let secrets = self
+            .secrets
+            .get_mut()
+            .unwrap_or_else(|error| error.into_inner());
+        zeroize_values(secrets);
     }
 }
 
 /// Lee el documento completo, o un objeto vacío si no existe o no es válido.
 fn read_document(path: &Path) -> serde_json::Value {
-    std::fs::read_to_string(path)
+    let Ok(mut raw) = std::fs::read_to_string(path) else {
+        return serde_json::Value::Object(serde_json::Map::new());
+    };
+    let document = serde_json::from_str::<serde_json::Value>(&raw)
         .ok()
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
         .filter(serde_json::Value::is_object)
-        .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()))
+        .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+    raw.zeroize();
+    document
 }
 
 fn read_keys(path: &Path) -> HashMap<String, String> {
-    read_document(path)
-        .get("api_keys")
-        .and_then(|keys| keys.as_object())
-        .map(|object| {
-            object
-                .iter()
-                .filter_map(|(key, value)| {
-                    value.as_str().map(|text| (key.clone(), text.to_string()))
-                })
-                .collect()
+    let mut document = read_document(path);
+    let Some(object) = document
+        .get_mut("api_keys")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return HashMap::new();
+    };
+
+    std::mem::take(object)
+        .into_iter()
+        .filter_map(|(key, value)| match value {
+            serde_json::Value::String(secret) => Some((key, secret)),
+            _ => None,
         })
-        .unwrap_or_default()
+        .collect()
 }
 
 fn write_keys(path: &Path, keys: &HashMap<String, String>) -> Result<()> {
@@ -182,6 +208,13 @@ fn write_keys(path: &Path, keys: &HashMap<String, String>) -> Result<()> {
         .collect();
 
     if let serde_json::Value::Object(map) = &mut document {
+        if let Some(serde_json::Value::Object(mut old_keys)) = map.remove("api_keys") {
+            for value in old_keys.values_mut() {
+                if let serde_json::Value::String(secret) = value {
+                    secret.zeroize();
+                }
+            }
+        }
         map.insert("api_keys".to_string(), serde_json::Value::Object(object));
     }
 
@@ -189,11 +222,34 @@ fn write_keys(path: &Path, keys: &HashMap<String, String>) -> Result<()> {
         std::fs::create_dir_all(parent).map_err(|error| SecretError::Store(error.to_string()))?;
     }
 
-    let serialized = serde_json::to_string_pretty(&document)
+    let mut serialized = serde_json::to_string_pretty(&document)
         .map_err(|error| SecretError::Store(error.to_string()))?;
-    std::fs::write(path, serialized).map_err(|error| SecretError::Store(error.to_string()))?;
+    let write_result = std::fs::write(path, serialized.as_bytes())
+        .map_err(|error| SecretError::Store(error.to_string()));
+    serialized.zeroize();
+    zeroize_document_keys(&mut document);
+    write_result?;
     crate::config::restrict_permissions(path);
     Ok(())
+}
+
+fn zeroize_document_keys(document: &mut serde_json::Value) {
+    if let Some(keys) = document
+        .get_mut("api_keys")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for value in keys.values_mut() {
+            if let serde_json::Value::String(secret) = value {
+                secret.zeroize();
+            }
+        }
+    }
+}
+
+fn zeroize_values<K>(values: &mut HashMap<K, String>) {
+    for value in values.values_mut() {
+        value.zeroize();
+    }
 }
 
 fn locked() -> SecretError {
@@ -323,6 +379,34 @@ mod tests {
             Some("otro-token".to_string())
         );
 
+        let _ = std::fs::remove_dir_all(path.parent().expect("padre"));
+    }
+
+    #[test]
+    fn actualizaciones_concurrentes_no_pierden_claves_de_otros_proveedores() {
+        let path = temp_settings("concurrente");
+        let store = std::sync::Arc::new(SettingsStore::new(&path));
+        let threads: Vec<_> = ProviderId::ALL
+            .into_iter()
+            .map(|provider| {
+                let store = std::sync::Arc::clone(&store);
+                std::thread::spawn(move || {
+                    store
+                        .set(provider, &format!("token-{}", provider.key()))
+                        .expect("guarda concurrentemente");
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().expect("hilo termina");
+        }
+
+        for provider in ProviderId::ALL {
+            assert_eq!(
+                store.get(provider).expect("lee clave"),
+                Some(format!("token-{}", provider.key()))
+            );
+        }
         let _ = std::fs::remove_dir_all(path.parent().expect("padre"));
     }
 }

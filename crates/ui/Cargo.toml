@@ -21,3 +21,4 @@ egui_extras.workspace = true
 pulldown-cmark.workspace = true
 rfd.workspace = true
 tracing.workspace = true
+zeroize.workspace = true

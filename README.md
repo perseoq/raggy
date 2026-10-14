@@ -196,14 +196,19 @@ Variables de entorno útiles:
 
 - **El índice es local.** Los documentos se dividen y se vectorizan en tu equipo;
   no se envía el corpus a ningún servicio.
-- **Al chatear solo se envían** al proveedor que elijas los fragmentos
-  recuperados necesarios y tu pregunta. **No hay telemetría.**
-- La aplicación muestra este aviso en la primera ejecución.
+- Al chatear se envían al proveedor que elijas **la pregunta actual, los
+  fragmentos recuperados y el historial previo de la conversación**. Si pides
+  modificar un artefacto, también puede enviarse su contenido. **No hay
+  telemetría.**
+- El aviso de privacidad se muestra en la primera ejecución y vuelve a mostrarse
+  cuando cambia su contenido.
 - Las claves **nunca aparecen en los registros**: van tras un tipo `Secret` que
-  redacta su valor en cualquier traza y lo borra de la memoria al liberarlo.
-- Las claves se guardan en `settings.json`, que se crea con permisos `0600` en
-  Unix. Si prefieres no persistirlas, deja `api_keys` vacío y usa las variables
-  de entorno.
+  redacta su valor en `Debug`/`Display` y zeroiza las copias bajo control de la
+  aplicación al liberarlas.
+- Las claves se guardan en **texto claro** en `settings.json` (permisos `0600`
+  en Unix; en otros sistemas dependen de los permisos heredados del directorio).
+  No se cifran ni se guardan en el llavero del sistema. Para no persistirlas,
+  usa las variables de entorno y deja `api_keys` vacío.
 - El respaldo **omite las claves** al empaquetar la configuración.
 
 ---

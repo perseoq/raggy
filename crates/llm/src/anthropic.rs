@@ -19,6 +19,13 @@ pub struct AnthropicProvider {
     client: Client,
 }
 
+impl Drop for AnthropicProvider {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.api_key.zeroize();
+    }
+}
+
 impl AnthropicProvider {
     /// Crea el adaptador con la API Key indicada.
     pub fn new(api_key: String) -> Result<Self, ProviderError> {

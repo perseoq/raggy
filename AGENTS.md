@@ -22,15 +22,16 @@ cargo build --release
 ## Flujo obligatorio al terminar cada tarea
 
 **Nada de esto se pregunta ni se deja para después.** Al terminar cualquier tarea
-—por pequeña, técnica o documental que sea— hay que **compilar, hacer push y
-crear el release en GitHub** de forma automática. Cada tarea se publica como una
-versión. Sigue estos pasos en orden:
+hay que compilar y hacer push. El release también se publica automáticamente,
+salvo cuando el usuario haya acordado explícitamente un programa de varias fases
+con un único release final. En ese caso se valida y se sube cada fase, pero no se
+etiqueta ni se publica hasta completar la última.
 
 1. **Documenta la lista de cambios** en `CHANGELOG.md`, bajo `## [No publicado]`,
    con los encabezados que correspondan (`### Añadido`, `### Cambiado`,
    `### Corregido`, `### Eliminado`). Este es el registro que se conserva por
    versión; descríbelo de forma concreta y en español.
-2. **Sube la versión** del workspace en `Cargo.toml`
+2. **Para una tarea/release individual**, sube la versión del workspace en `Cargo.toml`
    (`[workspace.package] version`) según el tipo de cambio:
    - **Cambio menor** (corrección, ajuste, mejora pequeña): incrementa el último
      número. Ejemplo: `1.0.28` → `1.0.29` → `1.0.30`.
@@ -41,13 +42,19 @@ versión. Sigue estos pasos en orden:
    En caso de duda sobre si un cambio es mayor, trátalo como menor y consulta.
    Los crates heredan la versión con `version.workspace = true`; `Cargo.lock` se
    regenera al compilar y también se versiona.
-3. Mueve la entrada a `## [<versión>] - <AAAA-MM-DD>` (la versión resultante y
-   la fecha actual) y deja `## [No publicado]` vacía en la parte superior.
-4. Ejecuta la comprobación completa (formato, Clippy, pruebas y `build --release`).
-5. **Commit** en español: asunto conciso terminado en `; versión <versión>`, y en
-   el cuerpo el detalle de los cambios.
-6. `git push origin main`.
-7. **Tag y release**: crea un tag anotado y súbelo. Empujar el tag dispara el
+   En un programa de varias fases acordado con el usuario, conserva la versión
+   actual durante las fases intermedias; el incremento se hace al cerrar la última.
+3. En una publicación individual, mueve la entrada a `## [<versión>] - <AAAA-MM-DD>`
+   y deja `## [No publicado]` vacía. Durante un programa por fases, deja los
+   cambios de todas las fases bajo `## [No publicado]` hasta el cierre.
+4. Ejecuta la comprobación completa tras cada fase/tarea (formato, Clippy,
+   pruebas y `build --release`).
+5. **Commit** en español, con el detalle de los cambios. En publicaciones
+   individuales, termina el asunto con `; versión <versión>`. En fases
+   intermedias, indica `Fase N de M` y no incrementes la versión.
+6. `git push origin main` después de cada fase/tarea.
+7. **Al cerrar un release** (o la última fase del programa acordado), crea el
+   tag anotado y súbelo. Empujar el tag dispara el
    workflow `Release`, que compila para Linux/macOS/Windows y publica el GitHub
    Release con los binarios y sus checksums:
 
@@ -56,7 +63,7 @@ versión. Sigue estos pasos en orden:
    git push origin v<versión>
    ```
 
-8. **Verifica** que CI y Release terminan bien:
+8. **Verifica** que CI y, cuando corresponda, Release terminan bien:
 
    ```bash
    gh run list --limit 5
@@ -72,9 +79,10 @@ versión. Sigue estos pasos en orden:
   en inglés en la interfaz ni en los mensajes.
 - Respeta el diseño por capas y los contratos por trait ya existentes
   (`EmbeddingProvider`, `Chunker`, `Retriever`, `LlmProvider`, `SecretStore`).
-- Nunca escribas claves de API en el código ni en la documentación: van en
-  `settings.json` (permisos `0600` en Unix) o en variables de entorno. El tipo
-  `Secret` redacta su valor en `Debug`/`Display`.
+- Nunca escribas claves de API en el código ni en la documentación: se guardan
+  en `settings.json` (permisos `0600` en Unix; no están cifradas) o en variables
+  de entorno. El tipo `Secret` redacta su valor en `Debug`/`Display` y zeroiza
+  las copias bajo su control.
 - Comenta el *porqué*, no el *qué*. Mantén las citas a las HU.
 - Los cambios solo de documentación o proceso también siguen este flujo
   (versión + tag) como cambios menores.
