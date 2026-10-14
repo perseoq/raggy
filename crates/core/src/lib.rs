@@ -11,6 +11,7 @@ pub mod config;
 pub mod error;
 pub mod export;
 pub mod index;
+pub mod ingest;
 pub mod paths;
 pub mod search;
 pub mod secrets;
@@ -25,16 +26,18 @@ pub use backup::{export_backup, import_backup, BackupSummary};
 pub use chat::{
     compose_request, context_from_retrieved, ChatCommand, ChatEvent, ChatWorker, ProviderFactory,
 };
-pub use config::{AppConfig, ModelConfig, RagConfig, Theme, DEFAULT_TEMPERATURE};
+pub use config::{AppConfig, IngestConfig, ModelConfig, RagConfig, Theme, DEFAULT_TEMPERATURE};
 pub use error::{CoreError, Result};
 pub use export::{session_markdown, write_session_export};
 pub use index::{
     index_folder, is_indexable, scan_indexable_files, IndexCommand, IndexEvent, IndexOptions,
     IndexPhase, IndexProgress, IndexSummary, IndexWorker, INDEXABLE_EXTENSIONS,
 };
+pub use ingest::tools_report;
 pub use paths::{
     home_dir, migrate_data, resolve, resolve_from, AppPaths, HOME_DIR_NAME, HOME_ENV, SETTINGS_FILE,
 };
+pub use raggy_docs::ExtractOptions;
 pub use search::{build_retriever, embedding_coverage, search_folder, EmbeddingCoverage};
 pub use secrets::{
     mask, resolve_key, MemoryStore, Secret, SecretError, SecretStore, SettingsStore,

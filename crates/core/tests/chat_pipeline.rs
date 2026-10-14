@@ -42,6 +42,7 @@ fn index_options() -> IndexOptions {
             overlap_chars: 40,
         },
         embedding_dimensions: 128,
+        extract: raggy_core::ExtractOptions::default(),
     }
 }
 

@@ -91,6 +91,28 @@ impl RagConfig {
     }
 }
 
+/// Parámetros de ingesta de documentos y OCR (fase 2.0.0).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct IngestConfig {
+    /// ¿Se aplica OCR a las páginas escaneadas si hay Tesseract?
+    pub ocr_enabled: bool,
+    /// Idiomas de OCR (códigos de Tesseract, p. ej. `spa` o `spa+eng`).
+    pub ocr_languages: Vec<String>,
+    /// Texto mínimo de una página para no considerarla escaneada.
+    pub min_text_chars: usize,
+}
+
+impl Default for IngestConfig {
+    fn default() -> Self {
+        Self {
+            ocr_enabled: true,
+            ocr_languages: vec!["spa".to_string()],
+            min_text_chars: 24,
+        }
+    }
+}
+
 /// Parámetros del modelo por defecto (HU-13, HU-15).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -128,6 +150,8 @@ pub struct AppConfig {
     pub rag: RagConfig,
     /// Parámetros del modelo.
     pub model: ModelConfig,
+    /// Parámetros de ingesta de documentos y OCR.
+    pub ingest: IngestConfig,
     /// Si el usuario ya ha visto el aviso de privacidad (HU-30).
     pub data_notice_acknowledged: bool,
     /// Último tamaño de la ventana en píxeles lógicos, para restaurarlo.
@@ -145,6 +169,7 @@ impl Default for AppConfig {
             language: "es".to_string(),
             rag: RagConfig::default(),
             model: ModelConfig::default(),
+            ingest: IngestConfig::default(),
             data_notice_acknowledged: false,
             window_size: None,
             data_dir: None,
@@ -236,6 +261,17 @@ impl AppConfig {
                 "la dimensionalidad del embedding debe estar entre 16 y 8192 (valor: {})",
                 self.rag.embedding_dimensions
             )));
+        }
+        if self.ingest.ocr_enabled
+            && self
+                .ingest
+                .ocr_languages
+                .iter()
+                .all(|language| language.trim().is_empty())
+        {
+            return Err(CoreError::InvalidConfig(
+                "el OCR está activado pero no hay idiomas configurados".to_string(),
+            ));
         }
         Ok(())
     }

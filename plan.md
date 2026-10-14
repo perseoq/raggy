@@ -21,14 +21,15 @@ Software de escritorio con interfaz gráfica moderna, escrito en Rust, que funci
 
 ### Incluido
 - GUI moderna multiplataforma (Windows, macOS, Linux).
-- Indexación RAG de carpetas con archivos `.md`.
+- Indexación RAG de carpetas con documentos: Markdown, texto, código, CSV,
+  Word, Excel, PowerPoint y PDF (con OCR para los escaneados).
 - Sesiones aisladas por carpeta indexada.
 - Chat con streaming, historial y memoria.
 - Descarga de código generado con nombre de archivo declarado.
 - Soporte multi-proveedor con configuración de API Keys.
 
 ### Excluido (v1)
-- Indexación de PDFs, DOCX, imágenes o audio.
+- Indexación de imágenes sueltas, audio o vídeo.
 - Colaboración multiusuario o sincronización en nube.
 - Fine-tuning de modelos.
 - Ejecución de código generado.
@@ -52,7 +53,10 @@ Software de escritorio con interfaz gráfica moderna, escrito en Rust, que funci
 
 ### 5.1 Gestión de Carpetas e Indexación
 - Selección de carpeta raíz mediante diálogo nativo.
-- Escaneo recursivo de archivos `.md`.
+- Escaneo recursivo de documentos y código (Markdown, texto, código, CSV, Office
+  y PDF).
+- Extracción de texto por formato y **OCR de PDF escaneados** con Tesseract
+  (idioma configurable); conversión de `.doc`/`.ppt` legacy con LibreOffice.
 - Chunking semántico respetando encabezados, listas y bloques de código.
 - Generación de embeddings y almacenamiento en índice vectorial por carpeta.
 - Re-indexación incremental (solo archivos nuevos o modificados).

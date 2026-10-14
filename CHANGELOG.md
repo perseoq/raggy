@@ -9,6 +9,30 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.0.0] - 2026-10-14
+
+### Añadido
+
+- **Ingesta de documentos**: además de Markdown, texto y código, ahora se
+  indexan CSV, Excel (`.xlsx`/`.xls`/`.xlsm`), Word (`.docx`), PowerPoint
+  (`.pptx`) y PDF. Nuevo crate `raggy-docs` con la extracción por formato.
+- **OCR de PDF escaneados** con Tesseract (idioma configurable, `spa` por
+  defecto), rasterizando las páginas con Poppler (`pdftoppm`); detección de las
+  herramientas y aviso con el comando de instalación por sistema operativo y
+  distribución.
+- **Conversión de formatos legacy** `.doc`/`.ppt` con LibreOffice headless.
+- **Citas por ubicación** (`página N`, `hoja X`, `filas N-M`, `diapositiva N`):
+  nueva columna `location` en `chunks` (migración 7) y en las citas.
+- **Configuración de ingesta** (`ingest` en `settings.json`): activación del OCR,
+  idiomas y umbral de texto; sección **OCR y conversión** en Configuración con el
+  botón «Comprobar herramientas» y los avisos de la indexación.
+
+### Cambiado
+
+- La indexación calcula el hash sobre los bytes del archivo (no sobre el texto
+  extraído), para poder saltar la extracción y el OCR cuando el documento no ha
+  cambiado.
+
 ## [1.0.30] - 2026-10-14
 
 ### Cambiado

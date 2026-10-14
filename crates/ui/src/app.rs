@@ -12,9 +12,10 @@ use raggy_core::chat::{compose_request, context_from_retrieved};
 use raggy_core::index::{IndexEvent, IndexOptions, IndexPhase, IndexWorker};
 use raggy_core::watch::FolderWatcher;
 use raggy_core::{
-    artifacts_for_prompt, relative_to, resolve_key, save_artifact, search_folder, AppConfig,
-    AppPaths, ChatEvent, ChatWorker, ConflictPolicy, ProviderFactory, RagConfig, SaveOutcome,
-    SecretStore, SettingsStore, Theme, APP_NAME, APP_VERSION,
+    artifacts_for_prompt, relative_to, resolve_key, save_artifact, search_folder, tools_report,
+    AppConfig, AppPaths, ChatEvent, ChatWorker, ConflictPolicy, ExtractOptions, IngestConfig,
+    ProviderFactory, RagConfig, SaveOutcome, SecretStore, SettingsStore, Theme, APP_NAME,
+    APP_VERSION,
 };
 use raggy_llm::{extract_code_blocks, suggest_filename, CodeBlock, ProviderId};
 use raggy_rag::{Chunk, ChunkingOptions, RetrievedChunk, RetrieverOptions};
@@ -197,6 +198,10 @@ pub struct RaggyApp {
     session_dialog: Option<SessionDialog>,
     settings_open: bool,
     settings_draft: RagConfig,
+    settings_ingest: IngestConfig,
+    settings_languages: String,
+    tools_report: Option<String>,
+    index_warnings: Vec<String>,
     visuals_applied: Option<(Theme, bool)>,
     secrets: Arc<dyn SecretStore>,
     keys_open: bool,
@@ -226,6 +231,8 @@ impl RaggyApp {
         crate::theme::apply(ctx, config.theme);
         egui_extras::install_image_loaders(&ctx.egui_ctx);
         let settings_draft = config.rag.clone();
+        let settings_ingest = config.ingest.clone();
+        let settings_languages = config.ingest.ocr_languages.join(", ");
         let secrets: Arc<dyn SecretStore> = Arc::new(SettingsStore::new(paths.settings_path()));
         let key_tab =
             ProviderId::from_key(&config.model.default_provider).unwrap_or(ProviderId::DeepSeek);
@@ -257,6 +264,10 @@ impl RaggyApp {
             session_dialog: None,
             settings_open: false,
             settings_draft,
+            settings_ingest,
+            settings_languages,
+            tools_report: None,
+            index_warnings: Vec::new(),
             visuals_applied: None,
             secrets,
             keys_open: false,
@@ -435,6 +446,11 @@ impl RaggyApp {
         IndexOptions {
             chunking: self.chunking_options(),
             embedding_dimensions: self.config.rag.embedding_dimensions,
+            extract: ExtractOptions {
+                ocr_enabled: self.config.ingest.ocr_enabled,
+                ocr_languages: self.config.ingest.ocr_languages.clone(),
+                min_text_chars: self.config.ingest.min_text_chars,
+            },
         }
     }
 
@@ -1332,10 +1348,18 @@ impl RaggyApp {
                             summary.chunks_written
                         ));
                     }
-                    self.status = format!(
-                        "Indexación completada: {} archivos actualizados.",
-                        summary.files_indexed
-                    );
+                    self.index_warnings = summary.warnings.clone();
+                    self.status = if summary.warnings.is_empty() {
+                        format!(
+                            "Indexación completada: {} archivos actualizados.",
+                            summary.files_indexed
+                        )
+                    } else {
+                        format!(
+                            "Indexación completada con {} avisos (ver Configuración › OCR).",
+                            summary.warnings.len()
+                        )
+                    };
                     self.results.clear();
                     self.search_note = None;
                     self.refresh_for(&summary.folder_id);
@@ -2608,6 +2632,8 @@ impl RaggyApp {
         let mut apply_directory: Option<bool> = None;
         let mut export = false;
         let mut import = false;
+        let mut check_tools = false;
+        let mut clear_warnings = false;
 
         let theme = self.config.theme;
         let current_dir = self.paths.data_dir.clone();
@@ -2689,6 +2715,49 @@ impl RaggyApp {
 
                 ui.add_space(8.0);
                 ui.separator();
+                ui.strong("OCR y conversión de documentos");
+                ui.checkbox(
+                    &mut self.settings_ingest.ocr_enabled,
+                    "Aplicar OCR a los PDF escaneados cuando esté disponible",
+                );
+                ui.horizontal(|ui| {
+                    ui.label("Idiomas de OCR");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.settings_languages)
+                            .desired_width(160.0)
+                            .hint_text("spa"),
+                    );
+                    ui.small("separados por coma (p. ej. spa, eng)");
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Texto mínimo por página para no usar OCR");
+                    ui.add(
+                        egui::DragValue::new(&mut self.settings_ingest.min_text_chars)
+                            .range(0..=5000),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    if ui.button("Comprobar herramientas").clicked() {
+                        check_tools = true;
+                    }
+                    if !self.index_warnings.is_empty() && ui.button("Limpiar avisos").clicked() {
+                        clear_warnings = true;
+                    }
+                });
+                if let Some(report) = &self.tools_report {
+                    ui.add_space(4.0);
+                    ui.monospace(report);
+                }
+                if !self.index_warnings.is_empty() {
+                    ui.add_space(4.0);
+                    ui.strong("Avisos de la última indexación");
+                    for warning in &self.index_warnings {
+                        ui.label(format!("• {warning}"));
+                    }
+                }
+
+                ui.add_space(8.0);
+                ui.separator();
                 ui.strong("Directorio de datos");
                 ui.small(format!(
                     "Configuración: {}",
@@ -2763,6 +2832,8 @@ impl RaggyApp {
         }
         if cancel || !open {
             self.settings_draft = self.config.rag.clone();
+            self.settings_ingest = self.config.ingest.clone();
+            self.settings_languages = self.config.ingest.ocr_languages.join(", ");
             self.settings_open = false;
         }
         if pick_directory {
@@ -2784,10 +2855,19 @@ impl RaggyApp {
         if import {
             self.import_backup_pick();
         }
+        if check_tools {
+            self.settings_ingest.ocr_languages = parse_languages(&self.settings_languages);
+            self.tools_report = Some(tools_report(&self.settings_ingest.ocr_languages));
+        }
+        if clear_warnings {
+            self.index_warnings.clear();
+        }
 
         if save {
             let mut candidate = self.config.clone();
             candidate.rag = self.settings_draft.clone();
+            candidate.ingest = self.settings_ingest.clone();
+            candidate.ingest.ocr_languages = parse_languages(&self.settings_languages);
             match candidate.validate() {
                 Ok(()) => {
                     self.config = candidate;
@@ -3248,6 +3328,15 @@ fn snippet(content: &str) -> String {
 }
 
 /// Etiqueta legible de un tema.
+/// Convierte una lista de idiomas separada por comas en un vector limpio.
+fn parse_languages(text: &str) -> Vec<String> {
+    text.split(',')
+        .map(str::trim)
+        .filter(|language| !language.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 fn theme_label(theme: Theme) -> &'static str {
     match theme {
         Theme::Light => "Claro · Novel",

@@ -20,16 +20,19 @@ A continuación, las historias de usuario organizadas por épica, con formato es
 
 ---
 
-### HU-02: Indexación automática de archivos Markdown
+### HU-02: Indexación automática de documentos
 **Como** usuario,
-**quiero** que la app escanee recursivamente la carpeta y procese todos los `.md`,
+**quiero** que la app escanee recursivamente la carpeta y procese todos los
+documentos soportados,
 **para** no tener que seleccionar archivos manualmente.
 
 **Criterios de aceptación:**
 - Se recorren todas las subcarpetas.
-- Solo se procesan archivos con extensión `.md`.
+- Se procesan Markdown, texto, código, CSV, Word (`.docx`/`.doc`), Excel
+  (`.xlsx`/`.xls`), PowerPoint (`.pptx`/`.ppt`) y PDF.
 - Se muestra progreso durante la indexación.
-- Los archivos vacíos o ilegibles se reportan pero no detienen el proceso.
+- Los archivos vacíos, ilegibles o que necesiten una herramienta ausente
+  (OCR/LibreOffice) se reportan con un aviso, pero no detienen el proceso.
 
 ---
 
@@ -55,6 +58,18 @@ A continuación, las historias de usuario organizadas por épica, con formato es
 - Se solicita confirmación antes de eliminar.
 - Se advierte que las sesiones asociadas también se eliminarán o quedarán huérfanas.
 - El índice vectorial y los metadatos se borran correctamente.
+
+---
+
+### HU-33: OCR de PDF escaneados
+**Como** usuario,
+**quiero** que los PDF sin capa de texto se reconozcan con OCR en español,
+**para** poder buscarlos igual que el resto de documentos.
+
+**Criterios de aceptación:**
+- Si hay Tesseract con el paquete de español y Poppler, el OCR se aplica solo.
+- Si falta alguna herramienta, se avisa con el comando de instalación del sistema.
+- El idioma de OCR y su activación se configuran en *Configuración › OCR*.
 
 ---
 

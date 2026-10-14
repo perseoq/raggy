@@ -118,6 +118,10 @@ A continuación, las tecnologías necesarias para construir este software, todas
 | Manejo de errores | `anyhow` + `thiserror` |
 | Regex para detectar bloques de código con nombre | `regex` |
 | Descarga de archivos generados | `std::fs` + `rfd` para elegir destino |
+| Extracción de documentos (CSV, Office) | `csv`, `calamine`, `quick-xml` |
+| Extracción de PDF | `lopdf` |
+| OCR (opcional, externo) | `tesseract` (+ paquete `spa`) y `pdftoppm` (Poppler) |
+| Conversión de `.doc`/`.ppt` (opcional, externo) | LibreOffice headless |
 
 ---
 
@@ -125,12 +129,13 @@ A continuación, las tecnologías necesarias para construir este software, todas
 
 Separar el proyecto en workspaces de Cargo:
 
-1. **`core`** — lógica de negocio: sesiones, RAG, artefactos, abstracción de proveedores.
-2. **`llm`** — adaptadores por proveedor (OpenAI, Anthropic, DeepSeek, OpenRouter).
-3. **`rag`** — chunking, embeddings, índice vectorial, retrieval.
-4. **`storage`** — SQLite, keyring, gestión de archivos.
-5. **`ui`** — interfaz gráfica (egui o Iced).
-6. **`app`** — binario principal que integra todo.
+1. **`core`** — lógica de negocio: sesiones, ingesta, artefactos, abstracción de proveedores.
+2. **`docs`** — extracción de texto de documentos (texto, CSV, Office, PDF) y OCR.
+3. **`llm`** — adaptadores por proveedor (OpenAI, Anthropic, DeepSeek, OpenRouter).
+4. **`rag`** — chunking, embeddings, índice vectorial, retrieval.
+5. **`storage`** — SQLite, migraciones y repositorio.
+6. **`ui`** — interfaz gráfica (egui).
+7. **`app`** — binario principal que integra todo.
 
 ---
 

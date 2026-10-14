@@ -21,13 +21,15 @@ use raggy_storage::{Document, Folder, FolderStatus, Storage};
 
 use crate::error::{CoreError, Result};
 
-/// Opciones de indexación: chunking más dimensionalidad de los embeddings.
+/// Opciones de indexación: chunking, embeddings y extracción de documentos.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexOptions {
     /// Parámetros de división en fragmentos.
     pub chunking: ChunkingOptions,
     /// Dimensionalidad de los embeddings locales.
     pub embedding_dimensions: usize,
+    /// Opciones de extracción (OCR, idiomas, umbral de texto).
+    pub extract: ExtractOptions,
 }
 
 impl Default for IndexOptions {
@@ -35,6 +37,7 @@ impl Default for IndexOptions {
         Self {
             chunking: ChunkingOptions::default(),
             embedding_dimensions: 512,
+            extract: ExtractOptions::default(),
         }
     }
 }
@@ -304,12 +307,11 @@ fn extract_chunks(
         return Ok((chunker.chunk(&source, &options.chunking), Vec::new()));
     }
 
-    let document = raggy_docs::extract(path, &ExtractOptions::default()).map_err(|error| {
-        CoreError::Index {
+    let document =
+        raggy_docs::extract(path, &options.extract).map_err(|error| CoreError::Index {
             path: path.to_path_buf(),
             message: error.to_string(),
-        }
-    })?;
+        })?;
     let warnings = document.warnings;
 
     let sections: Vec<DocumentSection> = document
@@ -550,6 +552,7 @@ mod tests {
                 overlap_chars: 20,
             },
             embedding_dimensions: 128,
+            extract: ExtractOptions::default(),
         }
     }
 

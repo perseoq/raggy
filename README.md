@@ -18,10 +18,19 @@ Windows.
 
 ## Características
 
-### Indexación local de Markdown y código
-- Añade carpetas con el diálogo nativo; se recorren recursivamente los `.md`,
-  `.txt` y **archivos de código** (`py`, `rs`, `cpp`, `h`, `go`, `ts`…).
-- Botón **Subir archivos** para incorporar archivos sueltos de código: se copian
+### Indexación local de documentos y código
+- Añade carpetas con el diálogo nativo; se recorren recursivamente **Markdown**
+  (`.md`, `.markdown`, `.mdx`), **texto** (`.txt`), **archivos de código**
+  (`py`, `rs`, `cpp`, `h`, `go`, `ts`…) y **documentos**: `.csv`, `.docx`,
+  `.xlsx`/`.xls`/`.xlsm`, `.pptx`, `.pdf` y los formatos legacy `.doc`/`.ppt`.
+- **Extracción de texto por formato**: CSV (filas), Excel (hojas), Word
+  (párrafos y títulos), PowerPoint (diapositivas) y PDF (páginas), con citas por
+  ubicación (`página 3`, `hoja Ventas`, `filas 1-100`, `diapositiva 2`).
+- **OCR de PDF escaneados** con **Tesseract** (idioma configurable, por defecto
+  español) rasterizando las páginas con **Poppler**. Si faltan las herramientas,
+  la app avisa con el comando de instalación de tu sistema. Los `.doc`/`.ppt`
+  legacy se convierten con **LibreOffice** si está instalado.
+- Botón **Subir archivos** para incorporar archivos sueltos: se copian
   a una carpeta gestionada («Archivos subidos») que se indexa como una más, sin
   tocar los originales.
 - **Chunking semántico**: respeta encabezados, listas y bloques de código (un
@@ -90,6 +99,13 @@ Requisitos en Linux: las bibliotecas habituales del entorno gráfico (X11) y un
 portal de escritorio (`xdg-desktop-portal`) para el diálogo de selección de
 carpeta.
 
+Herramientas **opcionales** (solo si vas a usar esas funciones):
+
+- **OCR de PDF escaneados**: `tesseract` con el paquete de español y Poppler
+  (`pdftoppm`). La app muestra el comando exacto de tu sistema en
+  *Configuración › OCR y conversión*.
+- **Formatos legacy `.doc`/`.ppt`**: LibreOffice.
+
 ---
 
 ## Uso
@@ -153,6 +169,7 @@ Todo vive en la **carpeta base** `~/.raggydesktop/`:
             "similarity_threshold": 0.3, "embedding_dimensions": 512 },
   "model": { "temperature": 0.1, "max_tokens": 2048,
              "default_provider": "deepseek", "default_model": "deepseek-chat" },
+  "ingest": { "ocr_enabled": true, "ocr_languages": ["spa"], "min_text_chars": 24 },
   "data_dir": null,
   "api_keys": {}
 }
@@ -210,6 +227,7 @@ RAGGY_HOME=./raggy-home RUST_LOG=debug cargo run -p raggy-app
 raggy/
 ├── crates/
 │   ├── core/       # configuración, rutas, indexación, chat, artefactos, respaldo
+│   ├── docs/       # extracción de documentos (CSV, Office, PDF) y OCR
 │   ├── llm/        # contrato multi-proveedor, streaming SSE y prompt estricto
 │   ├── rag/        # chunking semántico, embeddings, BM25 y recuperación híbrida
 │   ├── storage/    # SQLite, migraciones versionadas y repositorio
