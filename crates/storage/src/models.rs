@@ -127,7 +127,7 @@ pub struct Message {
     pub role: String,
     /// Contenido textual.
     pub content: String,
-    /// Si la respuesta está anclada a fuentes del RAG (HU-11).
+    /// Si la respuesta contiene al menos una cita validada contra el contexto (HU-11).
     pub anchored: bool,
     /// Fuentes citadas en la generación (HU-11).
     pub citations: Vec<raggy_rag::Citation>,
@@ -136,20 +136,30 @@ pub struct Message {
 }
 
 impl Message {
-    /// Crea un mensaje nuevo.
+    /// Crea un mensaje nuevo. `anchored` se conserva por compatibilidad, pero
+    /// el valor se recalcula a partir de las citas verificadas.
     pub fn new(
         session_id: impl Into<String>,
         role: impl Into<String>,
         content: impl Into<String>,
-        anchored: bool,
+        _anchored: bool,
         citations: Vec<raggy_rag::Citation>,
     ) -> Self {
+        let role = role.into();
+        let content = content.into();
+        let citations = if role == "assistant" {
+            raggy_rag::verify_citations(&content, &citations)
+        } else {
+            Vec::new()
+        };
+        // No se confía en el booleano del llamador: el anclaje se deriva de las
+        // citas que realmente aparecen y coinciden con las fuentes recuperadas.
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             session_id: session_id.into(),
-            role: role.into(),
-            content: content.into(),
-            anchored,
+            anchored: role == "assistant" && !citations.is_empty(),
+            role,
+            content,
             citations,
             created_at: chrono::Utc::now().to_rfc3339(),
         }
@@ -283,5 +293,47 @@ mod tests {
         let session = Session::new(&folder.id, "deepseek", "deepseek-chat");
         assert_eq!(session.folder_id, folder.id);
         assert!(!session.title.is_empty());
+    }
+
+    #[test]
+    fn un_mensaje_solo_queda_anclado_con_una_cita_verificada() {
+        let citation = raggy_rag::Citation {
+            source_file: "guia.md".to_string(),
+            source_path: "docs/guia.md".to_string(),
+            heading: None,
+            location: Some("página 2".to_string()),
+            start_line: 4,
+            end_line: 8,
+            score: 0.9,
+        };
+        let unrelated = Message::new(
+            "session",
+            "assistant",
+            "La respuesta no cita la fuente.",
+            true,
+            vec![citation.clone()],
+        );
+        assert!(!unrelated.anchored);
+        assert!(unrelated.citations.is_empty());
+
+        let cited = Message::new(
+            "session",
+            "assistant",
+            "La respuesta cita [docs/guia.md (página 2)].",
+            false,
+            vec![citation.clone()],
+        );
+        assert!(cited.anchored);
+        assert_eq!(cited.citations, vec![citation]);
+
+        let user = Message::new(
+            "session",
+            "user",
+            "[docs/guia.md (página 2)]",
+            true,
+            vec![cited.citations[0].clone()],
+        );
+        assert!(!user.anchored);
+        assert!(user.citations.is_empty());
     }
 }

@@ -38,6 +38,11 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
   nombres, integridad y límites de tamaño/entradas; extrae en un directorio
   temporal privado con limpieza automática, reubica subidas/artefactos y apunta
   settings.json al nuevo directorio sin pisar la base activa.
+- **Fase 6 de correcciones 2.2.0 — citas verificables y navegables**: la búsqueda,
+  el panel de fragmentos, el chat y la exportación usan la misma etiqueta con la
+  ubicación propia de cada formato. Las citas de chat abren el fragmento exacto;
+  solo referencias presentes literalmente en las fuentes recuperadas se guardan
+  y cuentan como ancladas, incluso al volver a leer mensajes antiguos.
 - **Fase 4 de correcciones 2.2.0 — límites de recursos**: límites configurables
   para tamaño de entrada, expansión de paquetes Office, páginas PDF y píxeles
   OCR; timeout configurable de Tesseract/Poppler/LibreOffice. La extracción ZIP

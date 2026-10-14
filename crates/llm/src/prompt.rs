@@ -12,7 +12,11 @@ Reglas obligatorias:\n\
 1. Responde únicamente con información del contexto. No inventes nombres de \
 archivos, funciones, rutas, APIs ni comportamientos.\n\
 2. Si el contexto responde a la pregunta, total o parcialmente, respóndela de \
-forma directa y cita las fuentes con el formato [archivo:línea-línea].\n\
+forma directa y cita cada afirmación relevante pegando literalmente entre \
+corchetes una etiqueta que aparezca tras «Fuente:». No inventes ni modifiques \
+rutas ni ubicaciones; conserva, por ejemplo, «[docs/guia.md (líneas 3-8)]», \
+«[informe.pdf (página 2)]» o «[datos.xlsx (hoja Ventas, A2:D8)]» tal como se \
+presentan en el contexto.\n\
 3. Si el contexto solo cubre una parte, responde esa parte y aclara con tus \
 propias palabras qué queda fuera; no uses la frase de la regla 4.\n\
 4. Solo si el contexto no tiene nada relacionado con la pregunta, responde \

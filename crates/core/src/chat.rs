@@ -16,7 +16,7 @@ use raggy_llm::{
     build_system_prompt, ArtifactContext, ChatDelta, ChatMessage, ChatRequest, ContextBlock,
     LlmProvider, ProviderError, ProviderId,
 };
-use raggy_rag::{Citation, RetrievedChunk};
+use raggy_rag::{verify_citations, Citation, RetrievedChunk};
 use raggy_storage::{Message, Storage};
 
 use crate::error::{CoreError, Result};
@@ -277,6 +277,7 @@ fn generate(
                 return;
             }
 
+            let citations = verify_citations(&text, &citations);
             let anchored = !citations.is_empty();
             let message = Message::new(&session_id, "assistant", &text, anchored, citations);
             if let Err(error) = storage.add_message(&message) {

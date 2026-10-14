@@ -161,8 +161,12 @@ documentos soportados,
 - Cada afirmación relevante incluye referencia al archivo fuente.
 - La cita indica la ubicación según el formato: líneas (Markdown/código), página
   (PDF/Word), diapositiva (PowerPoint) o hoja + coordenadas de celda (Excel/CSV).
-- Las citas son clicables y abren el archivo en la vista previa.
-- Si el modelo no cita, la respuesta se marca como "no anclada".
+- En todos los paneles y en la exportación se usa `ruta (ubicación)`; para texto
+  sin localizador específico se usa `ruta (líneas N-M)`.
+- Solo se validan las etiquetas que coinciden literalmente con fragmentos
+  recuperados; las referencias no verificadas no anclan la respuesta.
+- Las citas verificadas son clicables y abren el fragmento exacto en la vista previa.
+- Si el modelo no cita una fuente recuperada, la respuesta se marca como "no anclada".
 
 ---
 

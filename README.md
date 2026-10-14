@@ -38,7 +38,8 @@ Windows.
   a una carpeta gestionada («Archivos subidos») que se indexa como una más, sin
   tocar los originales.
 - **Chunking semántico**: respeta encabezados, listas y bloques de código (un
-  bloque nunca se parte) y guarda archivo, ruta, encabezado padre y rango de líneas.
+  bloque nunca se parte) y guarda archivo, ruta, encabezado padre y ubicación
+  nativa del formato.
 - **Reindexación incremental** por hash del archivo y huella de opciones del
   pipeline: los cambios de chunking, embeddings, OCR o herramientas disponibles
   también se aplican al volver a indexar.
@@ -53,7 +54,7 @@ Windows.
 - Índice vectorial (similitud coseno) + índice léxico **BM25**, fusionados con un
   umbral de similitud configurable.
 - Buscador que muestra los fragmentos más relevantes con su puntuación y su cita
-  (`archivo.md:12-20`) y abre el archivo al seleccionarlos.
+  (`archivo.md (líneas 12-20)`) y abre el fragmento exacto al seleccionarlo.
 
 ### Chat con contexto y citas
 - **Sesiones aisladas por carpeta**: cada sesión solo consulta su propia
@@ -65,7 +66,9 @@ Windows.
 - **Citas precisas por formato**: por **líneas** en Markdown y código, por
   **página** en PDF y Word, por **diapositiva** en PowerPoint, y por **hoja y
   coordenadas de celda** en Excel y CSV (`hoja Ventas, A2:D20`).
-- **Citas clicables** en cada respuesta para abrir el fragmento de origen.
+- **Citas verificadas y clicables** en cada respuesta: solo se marcan como
+  ancladas las referencias que coinciden exactamente con fuentes recuperadas;
+  al pulsarlas se abre el fragmento correspondiente en la vista previa.
 - Temperatura `0.1` por defecto para minimizar invenciones.
 
 ### Código generado, listo para guardar

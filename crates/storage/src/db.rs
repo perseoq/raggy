@@ -173,4 +173,49 @@ mod tests {
             .expect("cuenta sesiones");
         assert_eq!(remaining, 0, "la sesión debió eliminarse en cascada");
     }
+
+    #[test]
+    fn al_leer_mensajes_legacy_revalida_el_anclaje_y_las_fuentes() {
+        let storage = Storage::open_in_memory().expect("abre en memoria");
+        let connection = storage.connection();
+        connection
+            .execute(
+                "INSERT INTO folders (id, path, name, status, file_count, created_at, updated_at)
+                 VALUES ('f1', '/tmp/docs', 'docs', 'indexed', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .expect("inserta carpeta");
+        connection
+            .execute(
+                "INSERT INTO sessions (id, folder_id, title, provider, model, created_at, updated_at)
+                 VALUES ('s1', 'f1', 'prueba', 'deepseek', 'deepseek-chat', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .expect("inserta sesión");
+
+        let candidate = raggy_rag::Citation {
+            source_file: "guia.md".to_string(),
+            source_path: "docs/guia.md".to_string(),
+            heading: None,
+            location: Some("página 2".to_string()),
+            start_line: 4,
+            end_line: 8,
+            score: 0.9,
+        };
+        let sources = serde_json::to_string(&[candidate]).expect("serializa las fuentes");
+        connection
+            .execute(
+                "INSERT INTO messages (id, session_id, role, content, anchored, citations, created_at)
+                 VALUES ('m1', 's1', 'assistant', 'respuesta sin referencia', 1, ?1, '2026-01-01T00:00:00Z')",
+                [sources],
+            )
+            .expect("inserta mensaje antiguo inconsistente");
+
+        let message = storage
+            .list_messages("s1")
+            .expect("lee el mensaje")
+            .remove(0);
+        assert!(!message.anchored);
+        assert!(message.citations.is_empty());
+    }
 }

@@ -408,8 +408,13 @@ impl Storage {
 
     /// Añade un mensaje a una sesión.
     pub fn add_message(&self, message: &Message) -> Result<()> {
-        let citations =
-            serde_json::to_string(&message.citations).unwrap_or_else(|_| "[]".to_string());
+        let citations = if message.role == "assistant" {
+            raggy_rag::verify_citations(&message.content, &message.citations)
+        } else {
+            Vec::new()
+        };
+        let anchored = message.role == "assistant" && !citations.is_empty();
+        let citations = serde_json::to_string(&citations).unwrap_or_else(|_| "[]".to_string());
         self.connection().execute(
             "INSERT INTO messages (id, session_id, role, content, anchored, citations, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -418,7 +423,7 @@ impl Storage {
                 message.session_id,
                 message.role,
                 message.content,
-                message.anchored as i64,
+                anchored as i64,
                 citations,
                 message.created_at,
             ],
@@ -429,7 +434,7 @@ impl Storage {
     /// Lista los mensajes de una sesión en orden cronológico.
     pub fn list_messages(&self, session_id: &str) -> Result<Vec<Message>> {
         let mut stmt = self.connection().prepare(
-            "SELECT id, session_id, role, content, anchored, created_at, citations
+            "SELECT id, session_id, role, content, created_at, citations
              FROM messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC",
         )?;
         let rows = stmt.query_map([session_id], row_to_message)?;
@@ -554,19 +559,27 @@ fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
 }
 
 fn row_to_message(row: &Row<'_>) -> rusqlite::Result<Message> {
-    let citations: Option<String> = row.get(6)?;
-    let citations = citations
+    let candidates: Option<String> = row.get(5)?;
+    let candidates: Vec<raggy_rag::Citation> = candidates
         .and_then(|raw| serde_json::from_str(&raw).ok())
         .unwrap_or_default();
+    let role: String = row.get(2)?;
+    let content: String = row.get(3)?;
+    let citations = if role == "assistant" {
+        raggy_rag::verify_citations(&content, &candidates)
+    } else {
+        Vec::new()
+    };
+    let anchored = role == "assistant" && !citations.is_empty();
 
     Ok(Message {
         id: row.get(0)?,
         session_id: row.get(1)?,
-        role: row.get(2)?,
-        content: row.get(3)?,
-        anchored: row.get::<_, i64>(4)? != 0,
+        role,
+        content,
+        anchored,
         citations,
-        created_at: row.get(5)?,
+        created_at: row.get(4)?,
     })
 }
 

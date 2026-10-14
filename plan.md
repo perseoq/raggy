@@ -71,7 +71,8 @@ Software de escritorio con interfaz gráfica moderna, escrito en Rust, que funci
 ### 5.3 Motor RAG
 - Recuperación de top-K fragmentos relevantes por consulta.
 - Re-ranking opcional para mejorar precisión.
-- Inyección de fragmentos con citas de archivo y línea.
+- Inyección de fragmentos con citas verificables de archivo y ubicación nativa
+  (líneas, página, diapositiva o coordenadas de hoja/celdas).
 - Umbral mínimo de similitud para descartar contexto irrelevante.
 
 ### 5.4 Motor de Chat

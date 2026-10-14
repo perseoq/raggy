@@ -93,6 +93,12 @@ fn el_prompt_incluye_la_instruccion_estricta_y_la_cita() {
         .messages
         .iter()
         .any(|message| message.content.contains("guia.md")));
+    assert!(request.messages[0]
+        .content
+        .contains(&format!("[Fuente: {}]", blocks[0].citation)));
+    assert!(request.messages[0]
+        .content
+        .contains("No inventes ni modifiques"));
     assert_eq!(request.messages.last().expect("último").role, Role::User);
     assert_eq!(request.temperature, 0.1);
 }
@@ -182,7 +188,12 @@ fn el_chat_transmite_y_persiste_la_respuesta_con_citas() {
         "¿Cómo instalo la aplicación?",
     );
 
-    let factory: ProviderFactory = Arc::new(|id| Ok(Box::new(MockProvider::new(id))));
+    let reply = format!(
+        "Instala la aplicación con cargo build --release. [{}]",
+        citations.first().expect("fuente recuperada").label()
+    );
+    let factory: ProviderFactory =
+        Arc::new(move |id| Ok(Box::new(MockProvider::with_reply(id, reply.clone()))));
     let worker = ChatWorker::spawn(db_path.clone(), factory).expect("arranca el chat");
 
     // Persistimos el mensaje del usuario como hace la interfaz.
@@ -190,7 +201,7 @@ fn el_chat_transmite_y_persiste_la_respuesta_con_citas() {
         &session.id,
         "user",
         "¿Cómo instalo la aplicación?",
-        true,
+        false,
         vec![],
     );
     storage
@@ -224,6 +235,7 @@ fn el_chat_transmite_y_persiste_la_respuesta_con_citas() {
     let assistant = messages.last().expect("respuesta");
     assert_eq!(assistant.role, "assistant");
     assert!(!assistant.content.is_empty());
+    assert!(assistant.anchored, "la cita del texto debe verificarse");
     assert!(!assistant.citations.is_empty(), "debería citar fuentes");
     assert!(assistant.citations[0]
         .source_path

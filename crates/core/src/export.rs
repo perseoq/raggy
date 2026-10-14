@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+use raggy_rag::verify_citations;
 use raggy_storage::{Artifact, Message, Session};
 
 use crate::error::{CoreError, Result};
@@ -33,13 +34,13 @@ pub fn session_markdown(
         };
         output.push_str(&format!("### {role}\n\n{}\n\n", message.content));
 
-        if !message.citations.is_empty() {
-            let labels: Vec<String> = message
-                .citations
+        let citations = verify_citations(&message.content, &message.citations);
+        if !citations.is_empty() {
+            let labels: Vec<String> = citations
                 .iter()
                 .map(|citation| format!("`{}`", citation.label()))
                 .collect();
-            output.push_str(&format!("Fuentes: {}\n\n", labels.join(", ")));
+            output.push_str(&format!("Fuentes verificadas: {}\n\n", labels.join(", ")));
         }
     }
 
@@ -120,7 +121,7 @@ mod tests {
         messages.push(Message::new(
             &session.id,
             "assistant",
-            "Ejecuta cargo build.",
+            "Ejecuta cargo build. [docs/guia.md (líneas 3-9)]",
             true,
             vec![raggy_rag::Citation {
                 source_file: "guia.md".to_string(),
@@ -148,7 +149,7 @@ mod tests {
         assert!(markdown.contains("Modelo: deepseek-chat"));
         assert!(markdown.contains("### Tú"));
         assert!(markdown.contains("### Asistente"));
-        assert!(markdown.contains("`docs/guia.md:3-9`"));
+        assert!(markdown.contains("`docs/guia.md (líneas 3-9)`"));
         assert!(markdown.contains("## Artefactos generados"));
         assert!(markdown.contains("```python"));
         assert!(markdown.contains("print('hola')"));

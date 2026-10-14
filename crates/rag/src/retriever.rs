@@ -1,6 +1,6 @@
 //! Recuperación de contexto: fusión híbrida de similitud vectorial y BM25.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -43,13 +43,62 @@ impl Citation {
         }
     }
 
-    /// Etiqueta legible, p. ej. `docs/guia.md:10-24` o `datos.csv (filas 1-100)`.
+    /// Etiqueta canónica, p. ej. `docs/guia.md (líneas 10-24)` o
+    /// `datos.xlsx (hoja Ventas, A2:D20)`.
     pub fn label(&self) -> String {
-        match &self.location {
-            Some(location) => format!("{} ({location})", self.source_path),
-            None => format!("{}:{}-{}", self.source_path, self.start_line, self.end_line),
-        }
+        let location = self
+            .location
+            .as_deref()
+            .filter(|location| !location.trim().is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("líneas {}-{}", self.start_line, self.end_line));
+        format!("{} ({location})", self.source_path)
     }
+
+    /// Comprueba que el texto cite literalmente esta fuente y no la mencione
+    /// solo dentro de código generado.
+    pub fn is_verified_in(&self, answer: &str) -> bool {
+        let mut markers = vec![format!("[{}]", self.label())];
+        if self
+            .location
+            .as_deref()
+            .is_none_or(|location| location.starts_with("líneas "))
+        {
+            // Las conversaciones previas a HU-11 ya pueden contener el formato
+            // `ruta:líneas`; se verifica solo si coincide con ese rango real.
+            markers.push(format!(
+                "[{}:{}-{}]",
+                self.source_path, self.start_line, self.end_line
+            ));
+        }
+        answer.split("```").step_by(2).any(|prose| {
+            prose
+                .split('`')
+                .step_by(2)
+                .any(|text| markers.iter().any(|marker| text.contains(marker)))
+        })
+    }
+
+    /// Comprueba si esta cita apunta al mismo fragmento almacenado.
+    pub fn matches_chunk(&self, chunk: &Chunk) -> bool {
+        let metadata = &chunk.metadata;
+        metadata.source_path == self.source_path
+            && metadata.start_line == self.start_line
+            && metadata.end_line == self.end_line
+            && metadata.location == self.location
+    }
+}
+
+/// Conserva solo las fuentes recuperadas que la respuesta cita literalmente.
+/// Las etiquetas repetidas se devuelven una sola vez, en orden de recuperación.
+pub fn verify_citations(answer: &str, candidates: &[Citation]) -> Vec<Citation> {
+    let mut labels = HashSet::new();
+    candidates
+        .iter()
+        .filter(|citation| citation.is_verified_in(answer))
+        .filter(|citation| labels.insert(citation.label()))
+        .cloned()
+        .collect()
 }
 
 /// Fragmento recuperado junto con sus puntuaciones.
@@ -217,6 +266,46 @@ mod tests {
                 end_line: 1,
             },
         }
+    }
+
+    #[test]
+    fn etiqueta_canonica_prefiere_la_ubicacion_del_formato() {
+        let mut source = chunk("doc", "texto");
+        source.metadata.location = Some("página 3".to_string());
+        let page = Citation::from_chunk(&source, 0.8);
+        assert_eq!(page.label(), "docs/doc.md (página 3)");
+        assert!(page.matches_chunk(&source));
+
+        source.metadata.location = Some("hoja Ventas, A2:D4".to_string());
+        let cells = Citation::from_chunk(&source, 0.8);
+        assert_eq!(cells.label(), "docs/doc.md (hoja Ventas, A2:D4)");
+
+        source.metadata.location = None;
+        source.metadata.start_line = 10;
+        source.metadata.end_line = 14;
+        let lines = Citation::from_chunk(&source, 0.8);
+        assert_eq!(lines.label(), "docs/doc.md (líneas 10-14)");
+        assert!(lines.matches_chunk(&source));
+    }
+
+    #[test]
+    fn solo_verifica_fuentes_recuperadas_citadas_fuera_de_codigo() {
+        let first = Citation::from_chunk(&chunk("a", "uno"), 0.9);
+        let mut second_chunk = chunk("b", "dos");
+        second_chunk.metadata.source_path = "docs/other.md".to_string();
+        let second = Citation::from_chunk(&second_chunk, 0.8);
+        let answer = format!(
+            "Dato comprobable [{}]. `código [{}]`\n```text\n[{}]\n```",
+            first.label(),
+            second.label(),
+            second.label()
+        );
+
+        let verified = verify_citations(&answer, &[first.clone(), second.clone(), first.clone()]);
+        assert_eq!(verified, vec![first.clone()]);
+        assert!(!second.is_verified_in(&answer));
+        assert!(verify_citations("[fuente-inventada]", &[second]).is_empty());
+        assert!(first.is_verified_in("Dato heredado [docs/doc.md:1-1]."));
     }
 
     fn retriever() -> HybridRetriever {

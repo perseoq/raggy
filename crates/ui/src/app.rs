@@ -19,7 +19,9 @@ use raggy_core::{
     APP_VERSION,
 };
 use raggy_llm::{extract_code_blocks, suggest_filename, CodeBlock, ProviderId};
-use raggy_rag::{Chunk, ChunkingOptions, RetrievedChunk, RetrieverOptions};
+use raggy_rag::{
+    verify_citations, Chunk, ChunkingOptions, Citation, RetrievedChunk, RetrieverOptions,
+};
 use raggy_storage::{Artifact, Document, Folder, Message, Session, Storage};
 
 /// Tiempo de espera antes de reindexar tras un cambio detectado en disco.
@@ -150,6 +152,7 @@ enum CentralAction {
     Search,
     ClearSearch,
     OpenDocument(String),
+    OpenCitation(Citation),
     SendMessage,
     StopGeneration,
     UpdateModel {
@@ -183,6 +186,7 @@ pub struct RaggyApp {
     entries: Vec<FolderEntry>,
     selected_folder: Option<String>,
     selected_document: Option<String>,
+    selected_chunk_id: Option<String>,
     documents: Vec<Document>,
     chunks_preview: Vec<Chunk>,
     pending_delete: Option<String>,
@@ -249,6 +253,7 @@ impl RaggyApp {
             entries: Vec::new(),
             selected_folder: None,
             selected_document: None,
+            selected_chunk_id: None,
             documents: Vec::new(),
             chunks_preview: Vec::new(),
             pending_delete: None,
@@ -531,6 +536,7 @@ impl RaggyApp {
         self.selected_folder = Some(id);
         self.active_session = None;
         self.selected_document = None;
+        self.selected_chunk_id = None;
         self.chunks_preview.clear();
         self.results.clear();
         self.search_note = None;
@@ -542,6 +548,7 @@ impl RaggyApp {
         self.documents.clear();
         self.chunks_preview.clear();
         self.selected_document = None;
+        self.selected_chunk_id = None;
 
         let Some(folder_id) = self.selected_folder.clone() else {
             return;
@@ -566,8 +573,24 @@ impl RaggyApp {
             Ok(chunks) => {
                 self.chunks_preview = chunks;
                 self.selected_document = Some(relative_path.to_string());
+                self.selected_chunk_id = None;
             }
             Err(error) => self.status = format!("No se pudieron cargar los fragmentos: {error}"),
+        }
+    }
+
+    fn open_citation(&mut self, citation: &Citation) {
+        self.load_chunks(&citation.source_path);
+        self.selected_chunk_id = self
+            .chunks_preview
+            .iter()
+            .find(|chunk| citation.matches_chunk(chunk))
+            .map(|chunk| chunk.id.clone());
+        if self.selected_chunk_id.is_none() {
+            self.status = format!(
+                "No se encontró el fragmento citado en {}.",
+                citation.label()
+            );
         }
     }
 
@@ -805,7 +828,7 @@ impl RaggyApp {
 
         if persist_user {
             if let Some(storage) = &self.storage {
-                let user_message = Message::new(&session.id, "user", &prompt, true, Vec::new());
+                let user_message = Message::new(&session.id, "user", &prompt, false, Vec::new());
                 if let Err(error) = storage.add_message(&user_message) {
                     self.chat_error = Some(format!("No se pudo guardar el mensaje: {error}"));
                     return;
@@ -1823,19 +1846,16 @@ impl RaggyApp {
                     for (index, result) in self.results.iter().enumerate() {
                         let metadata = &result.chunk.metadata;
                         let heading = metadata.heading.clone().unwrap_or_else(|| "—".to_string());
-                        let citation = format!(
-                            "{}:{}-{}",
-                            metadata.source_path, metadata.start_line, metadata.end_line
-                        );
+                        let citation = result.citation();
                         let label = format!(
                             "{}. [{:.2}] {}  ·  {}",
                             index + 1,
                             result.score,
-                            citation,
+                            citation.label(),
                             heading
                         );
                         if ui.selectable_label(false, label).clicked() {
-                            actions.push(CentralAction::OpenDocument(metadata.source_path.clone()));
+                            actions.push(CentralAction::OpenCitation(citation));
                         }
                         ui.small(snippet(&result.chunk.content));
                         ui.add_space(6.0);
@@ -2128,6 +2148,20 @@ impl RaggyApp {
                             &mut pending_previews,
                             &mut actions,
                         );
+
+                        let citations = verify_citations(&message.content, &message.citations);
+                        if citations.is_empty() {
+                            ui.weak("Sin citas verificadas.");
+                        } else {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.small("Fuentes verificadas:");
+                                for citation in citations {
+                                    if ui.link(citation.label()).clicked() {
+                                        actions.push(CentralAction::OpenCitation(citation));
+                                    }
+                                }
+                            });
+                        }
                     }
 
                     ui.add_space(10.0);
@@ -2174,11 +2208,12 @@ impl RaggyApp {
         )
     }
 
-    fn chunks_panel(&self, ui: &mut egui::Ui) {
+    fn chunks_panel(&mut self, ui: &mut egui::Ui) {
         let Some(relative_path) = self.selected_document.clone() else {
             return;
         };
 
+        let mut selected_chunk_id = None;
         egui::Panel::right("chunks_panel")
             .default_size(460.0)
             .show(ui, |ui| {
@@ -2191,12 +2226,16 @@ impl RaggyApp {
                         return;
                     }
                     for (index, chunk) in self.chunks_preview.iter().enumerate() {
-                        ui.label(format!(
-                            "Fragmento {} · líneas {}-{}",
-                            index + 1,
-                            chunk.metadata.start_line,
-                            chunk.metadata.end_line
-                        ));
+                        let citation = Citation::from_chunk(chunk, 0.0);
+                        if ui
+                            .selectable_label(
+                                self.selected_chunk_id.as_deref() == Some(&chunk.id),
+                                format!("Fragmento {} · {}", index + 1, citation.label()),
+                            )
+                            .clicked()
+                        {
+                            selected_chunk_id = Some(chunk.id.clone());
+                        }
                         if let Some(heading) = &chunk.metadata.heading {
                             ui.small(format!("Encabezado: {heading}"));
                         }
@@ -2208,6 +2247,9 @@ impl RaggyApp {
                     }
                 });
             });
+        if let Some(chunk_id) = selected_chunk_id {
+            self.selected_chunk_id = Some(chunk_id);
+        }
     }
 
     fn delete_dialog(&mut self, ctx: &egui::Context) {
@@ -3274,6 +3316,7 @@ impl RaggyApp {
                     self.search_note = None;
                 }
                 CentralAction::OpenDocument(path) => self.load_chunks(&path),
+                CentralAction::OpenCitation(citation) => self.open_citation(&citation),
                 CentralAction::SendMessage => self.send_message(),
                 CentralAction::StopGeneration => {
                     if let Some(worker) = &self.chat_worker {
