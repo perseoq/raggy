@@ -12,10 +12,30 @@ use std::thread::{self, JoinHandle};
 
 use walkdir::WalkDir;
 
-use raggy_rag::{ChunkSource, Chunker, MarkdownChunker};
+use raggy_rag::{
+    ChunkSource, Chunker, ChunkingOptions, EmbeddingProvider, HashingEmbedding, MarkdownChunker,
+};
 use raggy_storage::{Document, Folder, FolderStatus, Storage};
 
 use crate::error::{CoreError, Result};
+
+/// Opciones de indexación: chunking más dimensionalidad de los embeddings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexOptions {
+    /// Parámetros de división en fragmentos.
+    pub chunking: ChunkingOptions,
+    /// Dimensionalidad de los embeddings locales.
+    pub embedding_dimensions: usize,
+}
+
+impl Default for IndexOptions {
+    fn default() -> Self {
+        Self {
+            chunking: ChunkingOptions::default(),
+            embedding_dimensions: 512,
+        }
+    }
+}
 
 /// Fase del proceso de indexación, para informar a la interfaz.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,7 +108,7 @@ pub fn index_folder(
     storage: &mut Storage,
     folder_id: &str,
     root: &Path,
-    options: &raggy_rag::ChunkingOptions,
+    options: &IndexOptions,
     report: &mut dyn FnMut(IndexProgress),
 ) -> Result<IndexSummary> {
     if !root.is_dir() {
@@ -118,6 +138,7 @@ pub fn index_folder(
         .collect();
 
     let chunker = MarkdownChunker::new();
+    let embedder = HashingEmbedding::new(options.embedding_dimensions);
     let mut summary = IndexSummary {
         folder_id: folder_id.to_string(),
         files_total: total,
@@ -162,9 +183,13 @@ pub fn index_folder(
             relative_path: &relative,
             content: &content,
         };
-        let chunks = chunker.chunk(&source, options);
+        let chunks = chunker.chunk(&source, &options.chunking);
+        let embeddings: Vec<Vec<f32>> = chunks
+            .iter()
+            .map(|chunk| embedder.embed(&chunk.content).vector)
+            .collect();
 
-        storage.replace_chunks(folder_id, &relative, &chunks)?;
+        storage.replace_chunks(folder_id, &relative, &chunks, &embeddings)?;
         let document = Document::new(
             folder_id,
             relative,
@@ -224,13 +249,13 @@ pub enum IndexCommand {
         folder_id: String,
         /// Raíz en disco.
         root: PathBuf,
-        /// Parámetros de chunking vigentes.
-        options: raggy_rag::ChunkingOptions,
+        /// Opciones de indexación vigentes.
+        options: IndexOptions,
     },
     /// Reindexa todas las carpetas registradas.
     ReindexAll {
-        /// Parámetros de chunking vigentes.
-        options: raggy_rag::ChunkingOptions,
+        /// Opciones de indexación vigentes.
+        options: IndexOptions,
     },
     /// Detiene el hilo.
     Shutdown,
@@ -281,12 +306,7 @@ impl IndexWorker {
     }
 
     /// Encola la indexación de una carpeta.
-    pub fn index_folder(
-        &self,
-        folder_id: impl Into<String>,
-        root: PathBuf,
-        options: raggy_rag::ChunkingOptions,
-    ) {
+    pub fn index_folder(&self, folder_id: impl Into<String>, root: PathBuf, options: IndexOptions) {
         let _ = self.command_tx.send(IndexCommand::IndexFolder {
             folder_id: folder_id.into(),
             root,
@@ -295,7 +315,7 @@ impl IndexWorker {
     }
 
     /// Encola la reindexación de todas las carpetas.
-    pub fn reindex_all(&self, options: raggy_rag::ChunkingOptions) {
+    pub fn reindex_all(&self, options: IndexOptions) {
         let _ = self.command_tx.send(IndexCommand::ReindexAll { options });
     }
 
@@ -360,7 +380,7 @@ fn run_index(
     event_tx: &Sender<IndexEvent>,
     folder_id: &str,
     root: &Path,
-    options: &raggy_rag::ChunkingOptions,
+    options: &IndexOptions,
 ) {
     let mut report = |progress: IndexProgress| {
         let _ = event_tx.send(IndexEvent::Progress(progress));
@@ -384,7 +404,6 @@ fn run_index(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use raggy_rag::ChunkingOptions;
 
     struct TemporalDir {
         path: PathBuf,
@@ -418,10 +437,13 @@ mod tests {
         }
     }
 
-    fn options() -> ChunkingOptions {
-        ChunkingOptions {
-            max_chars: 200,
-            overlap_chars: 20,
+    fn options() -> IndexOptions {
+        IndexOptions {
+            chunking: ChunkingOptions {
+                max_chars: 200,
+                overlap_chars: 20,
+            },
+            embedding_dimensions: 128,
         }
     }
 

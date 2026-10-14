@@ -31,10 +31,15 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "seguimiento por archivo para re-indexación incremental",
         sql: include_str!("../migrations/0002_documents.sql"),
     },
+    Migration {
+        version: 3,
+        description: "vector de embedding por fragmento",
+        sql: include_str!("../migrations/0003_chunk_embeddings.sql"),
+    },
 ];
 
 /// Versión de esquema que espera este binario.
-pub const LATEST_SCHEMA_VERSION: i64 = 2;
+pub const LATEST_SCHEMA_VERSION: i64 = 3;
 
 /// Aplica todas las migraciones pendientes dentro de una transacción.
 pub fn apply(conn: &mut Connection) -> Result<i64> {

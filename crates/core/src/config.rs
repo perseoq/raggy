@@ -38,6 +38,8 @@ pub struct RagConfig {
     pub top_k: usize,
     /// Umbral mínimo de similitud para descartar ruido.
     pub similarity_threshold: f32,
+    /// Dimensionalidad de los embeddings locales.
+    pub embedding_dimensions: usize,
 }
 
 impl Default for RagConfig {
@@ -47,6 +49,7 @@ impl Default for RagConfig {
             chunk_overlap: 100,
             top_k: 5,
             similarity_threshold: 0.3,
+            embedding_dimensions: 512,
         }
     }
 }
@@ -176,6 +179,12 @@ impl AppConfig {
             return Err(CoreError::InvalidConfig(
                 "top-k debe ser al menos 1".to_string(),
             ));
+        }
+        if !(16..=8192).contains(&self.rag.embedding_dimensions) {
+            return Err(CoreError::InvalidConfig(format!(
+                "la dimensionalidad del embedding debe estar entre 16 y 8192 (valor: {})",
+                self.rag.embedding_dimensions
+            )));
         }
         Ok(())
     }

@@ -8,15 +8,17 @@ pub mod config;
 pub mod error;
 pub mod index;
 pub mod paths;
+pub mod search;
 pub mod watch;
 
 pub use config::{AppConfig, ModelConfig, RagConfig, Theme, DEFAULT_TEMPERATURE};
 pub use error::{CoreError, Result};
 pub use index::{
-    index_folder, scan_markdown_files, IndexCommand, IndexEvent, IndexPhase, IndexProgress,
-    IndexSummary, IndexWorker,
+    index_folder, scan_markdown_files, IndexCommand, IndexEvent, IndexOptions, IndexPhase,
+    IndexProgress, IndexSummary, IndexWorker,
 };
 pub use paths::AppPaths;
+pub use search::{build_retriever, embedding_coverage, search_folder, EmbeddingCoverage};
 pub use watch::FolderWatcher;
 
 /// Nombre comercial del producto.

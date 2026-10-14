@@ -163,12 +163,15 @@ impl Storage {
         Ok(())
     }
 
-    /// Reemplaza de forma atómica los chunks de un archivo.
+    /// Reemplaza de forma atómica los chunks de un archivo y sus embeddings.
+    ///
+    /// `embeddings` debe tener la misma longitud que `chunks`.
     pub fn replace_chunks(
         &mut self,
         folder_id: &str,
         source_path: &str,
         chunks: &[Chunk],
+        embeddings: &[Vec<f32>],
     ) -> Result<()> {
         let tx = self.connection_mut().transaction()?;
         tx.execute(
@@ -178,10 +181,11 @@ impl Storage {
         {
             let mut stmt = tx.prepare(
                 "INSERT INTO chunks
-                     (id, folder_id, source_path, source_file, heading, start_line, end_line, content_hash, content)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                     (id, folder_id, source_path, source_file, heading, start_line, end_line,
+                      content_hash, content, embedding)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             )?;
-            for chunk in chunks {
+            for (chunk, embedding) in chunks.iter().zip(embeddings) {
                 stmt.execute(params![
                     chunk.id,
                     folder_id,
@@ -192,6 +196,7 @@ impl Storage {
                     chunk.metadata.end_line as i64,
                     chunk.content_hash,
                     chunk.content,
+                    encode_vector(embedding),
                 ])?;
             }
         }
@@ -207,6 +212,59 @@ impl Storage {
             |row| row.get(0),
         )?;
         Ok(count)
+    }
+
+    /// Cuenta los chunks con embedding almacenado.
+    pub fn count_embedded_chunks(&self, folder_id: &str) -> Result<i64> {
+        let count = self.connection().query_row(
+            "SELECT COUNT(*) FROM chunks WHERE folder_id = ?1 AND embedding IS NOT NULL",
+            [folder_id],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    /// Cuenta los chunks cuyo embedding tiene la dimensionalidad indicada.
+    pub fn count_chunks_with_embedding_dimensions(
+        &self,
+        folder_id: &str,
+        dimensions: usize,
+    ) -> Result<i64> {
+        let bytes = (dimensions * 4) as i64;
+        let count = self.connection().query_row(
+            "SELECT COUNT(*) FROM chunks WHERE folder_id = ?1 AND length(embedding) = ?2",
+            params![folder_id, bytes],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    /// Recupera todos los chunks de una carpeta con su embedding (si lo hay).
+    pub fn list_embedded_chunks(&self, folder_id: &str) -> Result<Vec<(Chunk, Option<Vec<f32>>)>> {
+        let mut stmt = self.connection().prepare(
+            "SELECT id, source_path, source_file, heading, start_line, end_line,
+                    content_hash, content, embedding
+             FROM chunks WHERE folder_id = ?1 ORDER BY source_path ASC, start_line ASC",
+        )?;
+        let rows = stmt.query_map([folder_id], |row| {
+            let blob: Option<Vec<u8>> = row.get(8)?;
+            Ok((
+                Chunk {
+                    id: row.get(0)?,
+                    content_hash: row.get(6)?,
+                    content: row.get(7)?,
+                    metadata: raggy_rag::ChunkMetadata {
+                        source_path: row.get(1)?,
+                        source_file: row.get(2)?,
+                        heading: row.get(3)?,
+                        start_line: row.get::<_, i64>(4)? as usize,
+                        end_line: row.get::<_, i64>(5)? as usize,
+                    },
+                },
+                blob.map(decode_vector),
+            ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     /// Recupera los chunks de un archivo concreto, ordenados por posición.
@@ -261,4 +319,21 @@ fn row_to_document(row: &Row<'_>) -> rusqlite::Result<Document> {
 
 fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339()
+}
+
+/// Codifica un vector de `f32` como bytes little-endian.
+fn encode_vector(vector: &[f32]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(vector.len() * 4);
+    for value in vector {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    bytes
+}
+
+/// Decodifica un vector almacenado como bytes little-endian.
+fn decode_vector(bytes: Vec<u8>) -> Vec<f32> {
+    bytes
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect()
 }

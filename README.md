@@ -5,9 +5,10 @@ a documentación Markdown local**. Indexas una carpeta, creas sesiones aisladas
 por carpeta y chateas con distintos proveedores de LLM (OpenAI, Anthropic,
 DeepSeek, OpenRouter), generando y descargando código trazable.
 
-> Estado: **Fase 1 completada** — ya se pueden indexar carpetas de Markdown y
-> explorar los fragmentos generados. El motor RAG, el chat y la gestión de
-> sesiones llegan en las siguientes fases.
+> Estado: **Fase 2 completada** — se pueden indexar carpetas de Markdown y
+> buscar por contenido con recuperación híbrida local (embeddings + BM25),
+> viendo los fragmentos relevantes con su cita. El chat y las sesiones llegan
+> en la siguiente fase.
 
 ## Documentación
 
@@ -23,7 +24,7 @@ DeepSeek, OpenRouter), generando y descargando código trazable.
 |---|---|---|
 | 0 | Cimientos: workspace, configuración, SQLite, esqueleto de UI y CI | ✅ |
 | 1 | Carpetas e indexación: añadir, escanear, chunking, incremental, eliminar | ✅ |
-| 2 | Motor RAG: embeddings, índice vectorial y recuperación | pendiente |
+| 2 | Motor RAG: embeddings, índice vectorial y recuperación | ✅ |
 | 3 | Chat y sesiones por carpeta | pendiente |
 | 4 | Multi-proveedor y claves | pendiente |
 | 5 | Generación y descarga de código, memoria de proyecto | pendiente |
@@ -56,6 +57,25 @@ DeepSeek, OpenRouter), generando y descargando código trazable.
   vista previa de los fragmentos de cada archivo.
 - La indexación se ejecuta en un hilo dedicado, por lo que la interfaz nunca se
   bloquea y muestra progreso.
+
+### Fase 2 — motor RAG (HU-10, HU-27 y datos de cita de HU-11)
+
+- **Embeddings locales** sin modelo ni red, con *feature hashing* determinista
+  (unigramas + bigramas, TF sublineal y normalización L2), en línea con la
+  privacidad de HU-30. El trait `EmbeddingProvider` queda listo para conectar un
+  modelo neuronal en el futuro.
+- **Índice vectorial** en memoria con búsqueda por similitud coseno y **índice
+  léxico BM25**; un recuperador **híbrido** fusiona ambos y aplica el umbral
+  mínimo de similitud (HU-10).
+- Los vectores se **persisten** en SQLite (columna `embedding` por fragmento) y
+  se generan durante la indexación.
+- **Buscador** en la interfaz: recupera los fragmentos más relevantes de la
+  carpeta seleccionada y los muestra ordenados con puntuación, archivo, rango de
+  líneas y encabezado; al elegir un resultado se abre su archivo. Si nada supera
+  el umbral, se avisa explícitamente (HU-10).
+- **Panel de configuración** del RAG (HU-27): tamaño de fragmento, solapamiento,
+  top-k, umbral de similitud y dimensionalidad del embedding, con validación y
+  persistencia.
 
 ## Estructura del proyecto
 

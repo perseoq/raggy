@@ -4,8 +4,8 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use raggy_core::{IndexEvent, IndexWorker};
-use raggy_rag::ChunkingOptions;
+use raggy_core::{IndexEvent, IndexOptions, IndexWorker};
+use raggy_rag::{ChunkingOptions, RetrieverOptions};
 use raggy_storage::{Folder, FolderStatus, Storage};
 
 struct Temporary {
@@ -40,10 +40,13 @@ impl Drop for Temporary {
     }
 }
 
-fn options() -> ChunkingOptions {
-    ChunkingOptions {
-        max_chars: 300,
-        overlap_chars: 40,
+fn options() -> IndexOptions {
+    IndexOptions {
+        chunking: ChunkingOptions {
+            max_chars: 300,
+            overlap_chars: 40,
+        },
+        embedding_dimensions: 128,
     }
 }
 
@@ -134,4 +137,62 @@ fn chunk_keeps_code_block(chunks: &[raggy_rag::Chunk]) -> bool {
             .count();
         fences % 2 == 0
     })
+}
+
+#[test]
+fn la_busqueda_encuentra_el_fragmento_relevante() {
+    let docs = Temporary::new("search-docs");
+    docs.write(
+        "indexacion.md",
+        "# Indexación\n\nLa reindexación incremental solo procesa archivos modificados.\n",
+    );
+    docs.write(
+        "temas.md",
+        "# Temas\n\nEl tema claro y oscuro se configura en las preferencias.\n",
+    );
+
+    let data = Temporary::new("search-data");
+    let db_path = data.join("raggy.sqlite3");
+
+    let folder = {
+        let storage = Storage::open(&db_path).expect("abre la base de datos");
+        let folder = Folder::new(docs.path.to_string_lossy().to_string(), "docs");
+        storage.upsert_folder(&folder).expect("registra la carpeta");
+        folder
+    };
+
+    let mut storage = Storage::open(&db_path).expect("reabre la base de datos");
+    let mut noop = |_| {};
+    raggy_core::index_folder(&mut storage, &folder.id, &docs.path, &options(), &mut noop)
+        .expect("indexa");
+
+    let options = RetrieverOptions {
+        top_k: 3,
+        min_score: 0.2,
+    };
+    let results = raggy_core::search_folder(
+        &storage,
+        &folder.id,
+        "reindexación incremental de archivos",
+        &options,
+        128,
+    )
+    .expect("busca");
+
+    assert!(!results.is_empty(), "debería haber resultados");
+    assert_eq!(results[0].chunk.metadata.source_path, "indexacion.md");
+
+    let strict = RetrieverOptions {
+        top_k: 3,
+        min_score: 0.95,
+    };
+    let none = raggy_core::search_folder(
+        &storage,
+        &folder.id,
+        "zeppelin sobre fotosíntesis cuántica",
+        &strict,
+        128,
+    )
+    .expect("busca sin coincidencias");
+    assert!(none.is_empty(), "el umbral alto no debería devolver nada");
 }
