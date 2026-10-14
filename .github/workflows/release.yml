@@ -78,7 +78,7 @@ jobs:
             Out-File -Encoding ascii "dist/$name.zip.sha256"
 
       - name: Guardar artefactos
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: raggy-${{ matrix.target }}
           path: |
