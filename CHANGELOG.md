@@ -9,6 +9,24 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [1.0.19] - 2026-10-14
+
+### Cambiado
+
+- **Diseño del chat** al estilo ChatGPT/Gemini: **burbujas** (a la derecha las
+  del usuario, a la izquierda las del asistente) sin las etiquetas «Tú» y
+  «Asistente», y **compositor fijo abajo** con el cuadro de texto de la **misma
+  altura que el botón** y un botón «Enviar» destacado. **Intro envía** y
+  Mayús+Intro inserta un salto de línea.
+- **Tipografía** dos puntos mayor en toda la interfaz, esquinas redondeadas y más
+  espaciado.
+- El código de las respuestas **ya no se repite** en la burbuja: se muestra la
+  prosa y, debajo, la tarjeta descargable.
+- **Prompt más preciso**: el modelo responde con la parte del contexto que sí
+  responde a la pregunta y reserva la frase de «no encontrado» para cuando no hay
+  nada relacionado, sin mezclarla con una respuesta. Las fuentes solo se muestran
+  cuando la respuesta está anclada.
+
 ## [1.0.18] - 2026-10-14
 
 ### Cambiado
@@ -69,6 +87,7 @@ Primera versión estable: cubre las 32 historias de usuario de `hu.md`.
   (arm64) y Windows, se empaquetan con sus checksums SHA-256 y se publican en
   GitHub Releases.
 
-[No publicado]: https://github.com/perseoq/raggy/compare/v1.0.18...HEAD
+[No publicado]: https://github.com/perseoq/raggy/compare/v1.0.19...HEAD
+[1.0.19]: https://github.com/perseoq/raggy/releases/tag/v1.0.19
 [1.0.18]: https://github.com/perseoq/raggy/releases/tag/v1.0.18
 [1.0.0]: https://github.com/perseoq/raggy/releases/tag/v1.0.0

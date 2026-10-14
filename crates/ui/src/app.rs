@@ -1594,7 +1594,7 @@ impl RaggyApp {
         actions
     }
 
-    /// Vista de chat de la sesión activa.
+    /// Vista de chat de la sesión activa, con el compositor fijo abajo.
     fn chat_view(&mut self, ui: &mut egui::Ui) -> Vec<CentralAction> {
         let mut actions = Vec::new();
         let Some(session) = self.active_session.clone() else {
@@ -1608,7 +1608,9 @@ impl RaggyApp {
             .as_ref()
             .filter(|stream| stream.session_id == session.id)
             .map(|stream| stream.text.clone());
+        let dark = ui.visuals().dark_mode;
 
+        // --- cabecera: sesión, proveedor, modelo, respaldo y acciones ---
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.heading(&session.title);
@@ -1681,7 +1683,7 @@ impl RaggyApp {
 
             if !self.provider_ready(provider) {
                 ui.colored_label(
-                    crate::theme::warning_color(ui.visuals().dark_mode),
+                    crate::theme::warning_color(dark),
                     format!("Sin API Key ({})", provider.api_key_env()),
                 );
                 if ui.small_button("Configurar").clicked() {
@@ -1689,48 +1691,128 @@ impl RaggyApp {
                 }
             }
 
-            ui.separator();
-            if ui.button("Artefactos").clicked() {
-                self.artifacts_open = true;
-            }
-            if ui.button("Exportar sesión").clicked() {
-                actions.push(CentralAction::ExportSession);
-            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Exportar sesión").clicked() {
+                    actions.push(CentralAction::ExportSession);
+                }
+                if ui.button("Artefactos").clicked() {
+                    self.artifacts_open = true;
+                }
+            });
         });
         ui.separator();
 
+        // --- compositor fijo en la parte inferior ---
+        let mut input = std::mem::take(&mut self.chat_input);
+        let mut send = false;
+        let mut stop = false;
+        let mut focused = false;
+
+        egui::Panel::bottom("chat_composer").show(ui, |ui| {
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(14, 12))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let button_width = 118.0;
+                        let gap = ui.spacing().item_spacing.x;
+                        let text_width = (ui.available_width() - button_width - gap).max(160.0);
+
+                        let response = ui.add(
+                            egui::TextEdit::multiline(&mut input)
+                                .desired_rows(2)
+                                .desired_width(text_width)
+                                .hint_text("Escribe tu pregunta…"),
+                        );
+                        focused = response.has_focus();
+                        let height = response.rect.height();
+
+                        let label = if is_streaming { "Detener" } else { "Enviar" };
+                        let button = if is_streaming {
+                            egui::Button::new(egui::RichText::new(label).size(15.0))
+                                .fill(crate::theme::secondary_button(dark))
+                                .corner_radius(egui::CornerRadius::same(8))
+                                .min_size(egui::vec2(button_width, height))
+                        } else {
+                            egui::Button::new(
+                                egui::RichText::new(label)
+                                    .size(15.0)
+                                    .color(crate::theme::on_accent(dark)),
+                            )
+                            .fill(crate::theme::accent(dark))
+                            .corner_radius(egui::CornerRadius::same(8))
+                            .min_size(egui::vec2(button_width, height))
+                        };
+                        if ui.add(button).clicked() {
+                            if is_streaming {
+                                stop = true;
+                            } else {
+                                send = true;
+                            }
+                        }
+                    });
+
+                    if let Some(error) = &self.chat_error {
+                        ui.add_space(6.0);
+                        ui.colored_label(crate::theme::error_color(dark), error);
+                        if self.retry_available(session.id.as_str()) {
+                            if let Some(fallback) = session
+                                .fallback_provider
+                                .as_deref()
+                                .and_then(ProviderId::from_key)
+                            {
+                                if ui
+                                    .button(format!(
+                                        "Usar {} y reintentar",
+                                        fallback.display_name()
+                                    ))
+                                    .clicked()
+                                {
+                                    actions.push(CentralAction::RetryWithFallback);
+                                }
+                            }
+                        }
+                    }
+                });
+        });
+
+        // Enter envía; Mayús+Intro inserta un salto de línea.
+        let shift = ui.input(|input_state| input_state.modifiers.shift);
+        if focused
+            && !shift
+            && !is_streaming
+            && ui.input_mut(|input_state| {
+                input_state.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+            })
+        {
+            send = true;
+        }
+
+        // --- conversación ---
         let mut pending_edits: Vec<(String, String)> = Vec::new();
         let mut pending_previews: Vec<String> = Vec::new();
 
         egui::ScrollArea::vertical()
             .id_salt("chat_messages")
+            .auto_shrink([false, false])
             .stick_to_bottom(true)
             .show(ui, |ui| {
-                if self.messages.is_empty() {
-                    ui.label("Sin mensajes todavía. Escribe abajo para empezar.");
+                if self.messages.is_empty() && streaming_text.is_none() {
+                    ui.add_space(24.0);
+                    ui.weak("Escribe tu primera pregunta sobre esta carpeta.");
+                    ui.add_space(12.0);
                 }
 
                 for message in &self.messages {
                     let is_user = message.role == "user";
-                    ui.horizontal(|ui| {
-                        ui.strong(if is_user { "Tú" } else { "Asistente" });
-                        if !is_user && !message.anchored {
-                            ui.small("(no anclada)");
-                        }
-                    });
-                    ui.add(egui::Label::new(&message.content).wrap());
 
-                    if !message.citations.is_empty() {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.small("Fuentes:");
-                            for citation in &message.citations {
-                                if ui.link(citation.label()).clicked() {
-                                    actions.push(CentralAction::OpenDocument(
-                                        citation.source_path.clone(),
-                                    ));
-                                }
-                            }
-                        });
+                    // La prosa va en la burbuja; el código, en su tarjeta.
+                    let prose = if is_user {
+                        message.content.clone()
+                    } else {
+                        raggy_llm::strip_code_blocks(&message.content)
+                    };
+                    if !prose.trim().is_empty() {
+                        message_bubble(ui, prose.trim(), is_user);
                     }
 
                     if !is_user {
@@ -1746,13 +1828,26 @@ impl RaggyApp {
                         );
                     }
 
-                    ui.separator();
+                    let refusal = message.content.contains(raggy_llm::NOT_FOUND_MESSAGE);
+                    if !is_user && !message.citations.is_empty() && !refusal {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.weak("Fuentes:");
+                            for citation in &message.citations {
+                                if ui.link(citation.label()).clicked() {
+                                    actions.push(CentralAction::OpenDocument(
+                                        citation.source_path.clone(),
+                                    ));
+                                }
+                            }
+                        });
+                    }
+                    ui.add_space(10.0);
                 }
 
                 if let Some(text) = &streaming_text {
-                    ui.strong("Asistente");
-                    ui.add(egui::Label::new(text).wrap());
-                    ui.small("generando…");
+                    message_bubble(ui, text, false);
+                    ui.weak("generando…");
+                    ui.add_space(10.0);
                 }
             });
 
@@ -1764,55 +1859,22 @@ impl RaggyApp {
             *entry = !*entry;
         }
 
-        ui.separator();
-        let mut input = std::mem::take(&mut self.chat_input);
-        ui.add_enabled_ui(!is_streaming, |ui| {
-            ui.add(
-                egui::TextEdit::multiline(&mut input)
-                    .desired_rows(3)
-                    .hint_text("Escribe tu pregunta…"),
-            );
-        });
-        ui.horizontal(|ui| {
-            if is_streaming {
-                if ui.button("Detener").clicked() {
-                    actions.push(CentralAction::StopGeneration);
-                }
-            } else if ui.button("Enviar").clicked() {
-                actions.push(CentralAction::SendMessage);
-            }
-            ui.label(format!(
-                "Temperatura {:.1} · máx {} tokens",
-                self.config.model.temperature, self.config.model.max_tokens
-            ));
-        });
         self.chat_input = input;
 
-        if let Some(error) = &self.chat_error {
-            ui.colored_label(crate::theme::error_color(ui.visuals().dark_mode), error);
-
-            let fallback = session
-                .fallback_provider
-                .as_deref()
-                .and_then(ProviderId::from_key);
-            let offer_fallback =
-                self.last_failure.as_ref().is_some_and(|failure| {
-                    failure.session_id == session.id && failure.availability
-                }) && fallback.is_some();
-
-            if offer_fallback {
-                if let Some(fallback) = fallback {
-                    if ui
-                        .button(format!("Usar {} y reintentar", fallback.display_name()))
-                        .clicked()
-                    {
-                        actions.push(CentralAction::RetryWithFallback);
-                    }
-                }
-            }
+        if stop {
+            actions.push(CentralAction::StopGeneration);
+        } else if send {
+            actions.push(CentralAction::SendMessage);
         }
 
         actions
+    }
+
+    /// ¿El último fallo permite ofrecer el proveedor de respaldo?
+    fn retry_available(&self, session_id: &str) -> bool {
+        self.last_failure
+            .as_ref()
+            .is_some_and(|failure| failure.session_id == session_id && failure.availability)
     }
 
     /// ¿El proveedor tiene credenciales listas para usar? (según la caché de claves)
@@ -2879,7 +2941,7 @@ impl eframe::App for RaggyApp {
         let resolved = ctx.theme();
         let key = (self.config.theme, resolved == egui::Theme::Dark);
         if self.visuals_applied != Some(key) {
-            ctx.set_visuals(crate::theme::visuals(self.config.theme, resolved));
+            crate::theme::apply_style(&ctx, self.config.theme);
             self.visuals_applied = Some(key);
         }
 
@@ -2970,6 +3032,34 @@ fn key_status_text(status: Option<&KeyStatus>) -> String {
     }
 }
 
+/// Dibuja un mensaje como burbuja; a la derecha si es del usuario.
+fn message_bubble(ui: &mut egui::Ui, content: &str, is_user: bool) {
+    let dark = ui.visuals().dark_mode;
+    let fill = if is_user {
+        crate::theme::user_bubble(dark)
+    } else {
+        crate::theme::assistant_bubble(dark)
+    };
+    let max_width = (ui.available_width() * 0.76).max(200.0);
+    let layout = if is_user {
+        egui::Layout::right_to_left(egui::Align::TOP)
+    } else {
+        egui::Layout::left_to_right(egui::Align::TOP)
+    };
+
+    ui.with_layout(layout, |ui| {
+        egui::Frame::NONE
+            .fill(fill)
+            .stroke(egui::Stroke::new(1.0, crate::theme::bubble_stroke(dark)))
+            .inner_margin(egui::Margin::symmetric(13, 9))
+            .corner_radius(egui::CornerRadius::same(10))
+            .show(ui, |ui| {
+                ui.set_max_width(max_width);
+                ui.add(egui::Label::new(content).wrap());
+            });
+    });
+}
+
 /// Dibuja los bloques de código de un mensaje con nombre editable y acciones.
 #[allow(clippy::too_many_arguments)]
 fn render_code_blocks(
@@ -2987,18 +3077,15 @@ fn render_code_blocks(
         return;
     }
 
-    ui.horizontal(|ui| {
-        ui.small(format!("{} bloque(s) de código", blocks.len()));
-        if blocks.len() > 1
-            && ui
-                .small_button(format!("Descargar todo ({})", blocks.len()))
-                .clicked()
-        {
-            actions.push(CentralAction::DownloadAll {
-                message_id: message_id.to_string(),
-            });
-        }
-    });
+    if blocks.len() > 1
+        && ui
+            .small_button(format!("Descargar todo ({})", blocks.len()))
+            .clicked()
+    {
+        actions.push(CentralAction::DownloadAll {
+            message_id: message_id.to_string(),
+        });
+    }
 
     for (index, block) in blocks.iter().enumerate() {
         let key = format!("{message_id}:{index}");

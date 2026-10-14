@@ -43,6 +43,83 @@ pub fn preference(theme: Theme) -> egui::ThemePreference {
     }
 }
 
+/// Tipografías del proyecto: dos puntos por encima de las de `egui`.
+pub fn text_styles() -> std::collections::BTreeMap<egui::TextStyle, egui::FontId> {
+    use egui::{FontFamily, FontId, TextStyle};
+
+    [
+        (
+            TextStyle::Small,
+            FontId::new(11.0, FontFamily::Proportional),
+        ),
+        (TextStyle::Body, FontId::new(15.0, FontFamily::Proportional)),
+        (
+            TextStyle::Button,
+            FontId::new(15.0, FontFamily::Proportional),
+        ),
+        (
+            TextStyle::Heading,
+            FontId::new(20.0, FontFamily::Proportional),
+        ),
+        (
+            TextStyle::Monospace,
+            FontId::new(15.0, FontFamily::Monospace),
+        ),
+    ]
+    .into()
+}
+
+/// Aplica la paleta, las tipografías y el espaciado del tema activo.
+///
+/// Es idempotente: fija valores absolutos, así que puede llamarse cada vez que
+/// cambie el tema sin acumular cambios.
+pub fn apply_style(ctx: &egui::Context, theme: Theme) {
+    ctx.set_visuals(visuals(theme, ctx.theme()));
+
+    let styles = text_styles();
+    ctx.all_styles_mut(|style| {
+        style.text_styles = styles.clone();
+        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+        style.spacing.button_padding = egui::vec2(10.0, 6.0);
+    });
+}
+
+/// Color de acento (botones principales, enlaces destacados).
+pub fn accent(dark: bool) -> Color32 {
+    if dark {
+        TN_BLUE
+    } else {
+        NOVEL_BLUE
+    }
+}
+
+/// Color del texto sobre el color de acento.
+pub fn on_accent(dark: bool) -> Color32 {
+    if dark {
+        TN_BG
+    } else {
+        Color32::WHITE
+    }
+}
+
+/// Color de un botón secundario (detener, cancelar).
+pub fn secondary_button(dark: bool) -> Color32 {
+    if dark {
+        TN_HIGHLIGHT
+    } else {
+        NOVEL_BG_ALT
+    }
+}
+
+/// Color del borde de las burbujas del chat.
+pub fn bubble_stroke(dark: bool) -> Color32 {
+    if dark {
+        TN_HIGHLIGHT
+    } else {
+        NOVEL_LINE
+    }
+}
+
 /// Paleta que corresponde a la configuración y al tema resuelto por el sistema.
 pub fn visuals(theme: Theme, resolved: EguiTheme) -> Visuals {
     match theme {
@@ -58,8 +135,7 @@ pub fn visuals(theme: Theme, resolved: EguiTheme) -> Visuals {
 /// Aplica el tema al arrancar.
 pub fn apply(ctx: &eframe::CreationContext<'_>, theme: Theme) {
     ctx.egui_ctx.set_theme(preference(theme));
-    let resolved = ctx.egui_ctx.theme();
-    ctx.egui_ctx.set_visuals(visuals(theme, resolved));
+    apply_style(&ctx.egui_ctx, theme);
 }
 
 /// Color de los mensajes de error.
@@ -77,6 +153,24 @@ pub fn warning_color(dark: bool) -> Color32 {
         TN_YELLOW
     } else {
         NOVEL_ORANGE
+    }
+}
+
+/// Color de la burbuja del usuario en el chat.
+pub fn user_bubble(dark: bool) -> Color32 {
+    if dark {
+        Color32::from_rgb(0x33, 0x3C, 0x5E)
+    } else {
+        Color32::from_rgb(0xC6, 0xD3, 0xDA)
+    }
+}
+
+/// Color de la burbuja del asistente en el chat.
+pub fn assistant_bubble(dark: bool) -> Color32 {
+    if dark {
+        Color32::from_rgb(0x1F, 0x23, 0x35)
+    } else {
+        NOVEL_BG_ALT
     }
 }
 
@@ -151,6 +245,19 @@ fn novel() -> Visuals {
     widgets.open.bg_stroke = Stroke::new(1.0, NOVEL_LINE);
     widgets.open.fg_stroke = Stroke::new(1.0, NOVEL_FG);
 
+    for widget in [
+        &mut widgets.noninteractive,
+        &mut widgets.inactive,
+        &mut widgets.hovered,
+        &mut widgets.active,
+        &mut widgets.open,
+    ] {
+        widget.corner_radius = egui::CornerRadius::same(6);
+    }
+
+    visuals.window_corner_radius = egui::CornerRadius::same(10);
+    visuals.menu_corner_radius = egui::CornerRadius::same(8);
+
     visuals
 }
 
@@ -193,6 +300,19 @@ fn tokyo_night() -> Visuals {
     widgets.open.weak_bg_fill = TN_BG;
     widgets.open.bg_stroke = Stroke::new(1.0, TN_HIGHLIGHT);
     widgets.open.fg_stroke = Stroke::new(1.0, TN_FG);
+
+    for widget in [
+        &mut widgets.noninteractive,
+        &mut widgets.inactive,
+        &mut widgets.hovered,
+        &mut widgets.active,
+        &mut widgets.open,
+    ] {
+        widget.corner_radius = egui::CornerRadius::same(6);
+    }
+
+    visuals.window_corner_radius = egui::CornerRadius::same(10);
+    visuals.menu_corner_radius = egui::CornerRadius::same(8);
 
     visuals
 }

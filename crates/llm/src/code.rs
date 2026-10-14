@@ -143,6 +143,55 @@ pub fn extract_code_blocks(text: &str) -> Vec<CodeBlock> {
     blocks
 }
 
+/// Devuelve el texto sin los bloques de código cercados, conservando la prosa.
+///
+/// Se usa para no repetir el código en la burbuja cuando ya se muestra como
+/// tarjeta descargable.
+pub fn strip_code_blocks(text: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    let mut open_fence: Option<(char, usize)> = None;
+
+    for line in text.split('\n') {
+        let trimmed = line.trim_start();
+        let marker = trimmed.chars().next();
+        let count = match marker {
+            Some(c) if c == '`' || c == '~' => trimmed.chars().take_while(|&x| x == c).count(),
+            _ => 0,
+        };
+        let is_fence = count >= 3;
+
+        match open_fence {
+            Some((open, length)) => {
+                if is_fence && marker == Some(open) && count >= length {
+                    open_fence = None;
+                }
+            }
+            None => {
+                if is_fence {
+                    open_fence = Some((marker.unwrap_or('`'), count));
+                } else {
+                    out.push(line);
+                }
+            }
+        }
+    }
+
+    let mut cleaned: Vec<&str> = Vec::new();
+    for line in out {
+        if line.trim().is_empty()
+            && (cleaned.is_empty() || cleaned.last().is_some_and(|last| last.trim().is_empty()))
+        {
+            continue;
+        }
+        cleaned.push(line);
+    }
+    while cleaned.last().is_some_and(|line| line.trim().is_empty()) {
+        cleaned.pop();
+    }
+
+    cleaned.join("\n")
+}
+
 /// Propone un nombre genérico y editable para un bloque sin nombre (HU-16).
 pub fn suggest_filename(language: Option<&str>, index: usize) -> String {
     let extension = language.and_then(extension_for).unwrap_or("txt");
@@ -397,6 +446,16 @@ mod tests {
         assert_eq!(suggest_filename(Some("rust"), 0), "snippet_1.rs");
         assert_eq!(suggest_filename(Some("python"), 2), "snippet_3.py");
         assert_eq!(suggest_filename(None, 0), "snippet_1.txt");
+    }
+
+    #[test]
+    fn quita_los_bloques_de_codigo_y_conserva_la_prosa() {
+        let text = "Antes de nada:\n\n```python\nprint(1)\n```\n\nY después.\n";
+        assert_eq!(strip_code_blocks(text), "Antes de nada:\n\nY después.");
+
+        assert_eq!(strip_code_blocks("```\nsolo código\n```"), "");
+        assert_eq!(strip_code_blocks("prosa sin código"), "prosa sin código");
+        assert_eq!(strip_code_blocks("Intro.\n\n```sh\nls\n```"), "Intro.");
     }
 
     #[test]
