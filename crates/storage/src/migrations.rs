@@ -56,10 +56,15 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "ubicación de origen del fragmento en documentos no Markdown",
         sql: include_str!("../migrations/0007_chunk_location.sql"),
     },
+    Migration {
+        version: 8,
+        description: "huella del pipeline de extracción y opciones por documento",
+        sql: include_str!("../migrations/0008_document_processing_hash.sql"),
+    },
 ];
 
 /// Versión de esquema que espera este binario.
-pub const LATEST_SCHEMA_VERSION: i64 = 7;
+pub const LATEST_SCHEMA_VERSION: i64 = 8;
 
 /// Aplica todas las migraciones pendientes dentro de una transacción.
 pub fn apply(conn: &mut Connection) -> Result<i64> {

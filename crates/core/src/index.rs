@@ -1,9 +1,9 @@
-//! Indexación de carpetas Markdown (HU-01 a HU-04).
+//! Indexación de carpetas y documentos (HU-01 a HU-04).
 //!
-//! El motor recorre una carpeta, divide cada `.md` en fragmentos con el
-//! [`MarkdownChunker`] y los persiste. La re-indexación es incremental: solo se
-//! reprocesan los archivos cuyo hash de contenido cambió, y los que ya no
-//! existen se retiran del índice.
+//! El motor recorre una carpeta, extrae documentos y código, los divide en
+//! fragmentos y los persiste. La re-indexación es incremental por contenido y
+//! por huella del pipeline (extractores, opciones y herramientas disponibles);
+//! los archivos que ya no existen se retiran solo si el recorrido fue completo.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -12,6 +12,7 @@ use std::thread::{self, JoinHandle};
 
 use walkdir::WalkDir;
 
+use raggy_docs::tools::{find_libreoffice, Tools};
 use raggy_docs::ExtractOptions;
 use raggy_rag::{
     chunk_sections, Chunk, ChunkSource, Chunker, ChunkingOptions, DocumentSection,
@@ -73,7 +74,7 @@ pub struct IndexProgress {
 pub struct IndexSummary {
     /// Carpeta procesada.
     pub folder_id: String,
-    /// Archivos `.md` encontrados.
+    /// Archivos indexables encontrados.
     pub files_total: usize,
     /// Archivos nuevos o modificados indexados.
     pub files_indexed: usize,
@@ -89,7 +90,7 @@ pub struct IndexSummary {
     pub warnings: Vec<String>,
 }
 
-/// ¿La ruta es un archivo que se puede indexar? (Markdown o código)
+/// ¿La ruta es un documento o código que se puede indexar?
 pub fn is_indexable(path: &Path) -> bool {
     let Some(extension) = path.extension().and_then(|ext| ext.to_str()) else {
         return false;
@@ -119,14 +120,66 @@ pub fn is_indexable(path: &Path) -> bool {
 
 /// Recorre recursivamente `root` y devuelve los archivos indexables.
 pub fn scan_indexable_files(root: &Path) -> Vec<PathBuf> {
-    WalkDir::new(root)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.file_type().is_file())
-        .map(|entry| entry.into_path())
-        .filter(|path| is_indexable(path))
-        .collect()
+    scan_indexable_files_checked(root).0
+}
+
+/// Recorre la carpeta y devuelve los archivos, si la enumeración fue completa,
+/// y avisos de errores. Un recorrido incompleto no se puede usar para borrar
+/// del índice archivos que no se alcanzaron a ver.
+fn scan_indexable_files_checked(root: &Path) -> (Vec<PathBuf>, bool, Vec<String>) {
+    let mut files = Vec::new();
+    let mut complete = true;
+    let mut warnings = Vec::new();
+
+    for entry in WalkDir::new(root).follow_links(false) {
+        match entry {
+            Ok(entry) if entry.file_type().is_file() && is_indexable(entry.path()) => {
+                files.push(entry.into_path());
+            }
+            Ok(_) => {}
+            Err(error) => {
+                complete = false;
+                let warning = format!("no se pudo recorrer una ruta: {error}");
+                tracing::warn!("{warning}");
+                warnings.push(warning);
+            }
+        }
+    }
+
+    (files, complete, warnings)
+}
+
+/// Calcula una huella estable de las opciones y herramientas que pueden
+/// cambiar el contenido extraído o los embeddings. Al instalar Tesseract,
+/// Poppler o LibreOffice después de una indexación fallida, la huella cambia y
+/// el siguiente reindexado vuelve a procesar esos archivos.
+fn processing_fingerprint(options: &IndexOptions) -> String {
+    let mut tools = Tools::detect();
+    tools.languages.sort();
+    let path_label = |path: &Option<PathBuf>| {
+        path.as_ref()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "ausente".to_string())
+    };
+    let libreoffice = find_libreoffice()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "ausente".to_string());
+    let embedding = HashingEmbedding::new(options.embedding_dimensions);
+    let descriptor = format!(
+        "pipeline={INDEX_PIPELINE_VERSION};chunk_size={};chunk_overlap={};embedding_name={};embedding_dimensions={};ocr_enabled={};ocr_languages={};min_text_chars={};tesseract={};tesseract_languages={};pdftoppm={};libreoffice={}",
+        options.chunking.max_chars,
+        options.chunking.overlap_chars,
+        embedding.name(),
+        embedding.dimensions(),
+        options.extract.ocr_enabled,
+        options.extract.ocr_languages.join(","),
+        options.extract.min_text_chars,
+        path_label(&tools.tesseract),
+        tools.languages.join(","),
+        path_label(&tools.pdftoppm),
+        libreoffice,
+    );
+    blake3::hash(descriptor.as_bytes()).to_hex().to_string()
 }
 
 /// Extensiones indexables, para los filtros de los diálogos.
@@ -138,6 +191,10 @@ pub const INDEXABLE_EXTENSIONS: &[&str] = &[
     "yml", "toml", "xml", "html", "css", "scss", "vue", "svelte", "zig", "nim", "jl", "groovy",
     "tf", "proto", "graphql", "ini", "cfg", "conf", "asm", "sol",
 ];
+
+/// Incrementar cuando cambie la semántica del pipeline (extractores, chunkers o
+/// embeddings) sin que cambien las opciones visibles.
+const INDEX_PIPELINE_VERSION: u32 = 1;
 
 /// Indexa una carpeta de forma incremental.
 ///
@@ -158,7 +215,7 @@ pub fn index_folder(
 
     storage.set_folder_status(folder_id, FolderStatus::Indexing, 0)?;
 
-    let mut files = scan_indexable_files(root);
+    let (mut files, scan_complete, scan_warnings) = scan_indexable_files_checked(root);
     files.sort();
     let total = files.len();
 
@@ -180,9 +237,11 @@ pub fn index_folder(
     let mut summary = IndexSummary {
         folder_id: folder_id.to_string(),
         files_total: total,
+        warnings: scan_warnings,
         ..IndexSummary::default()
     };
     let mut seen: HashSet<String> = HashSet::new();
+    let processing_hash = processing_fingerprint(options);
 
     for (position, path) in files.iter().enumerate() {
         let relative = relative_path(root, path);
@@ -211,10 +270,9 @@ pub fn index_folder(
         // extracción (y el OCR, en fases posteriores) si el documento no cambió.
         let content_hash = blake3::hash(&bytes).to_hex().to_string();
 
-        if existing
-            .get(&relative)
-            .is_some_and(|document| document.content_hash == content_hash)
-        {
+        if existing.get(&relative).is_some_and(|document| {
+            document.content_hash == content_hash && document.processing_hash == processing_hash
+        }) {
             summary.files_skipped += 1;
             continue;
         }
@@ -245,6 +303,7 @@ pub fn index_folder(
             folder_id,
             relative,
             content_hash,
+            processing_hash.clone(),
             size_bytes,
             modified_at,
             chunks.len() as i64,
@@ -255,15 +314,23 @@ pub fn index_folder(
         summary.chunks_written += chunks.len();
     }
 
-    for relative in existing.keys() {
-        if !seen.contains(relative) {
-            storage.delete_chunks_for_path(folder_id, relative)?;
-            storage.delete_document(folder_id, relative)?;
-            summary.files_removed += 1;
+    if scan_complete {
+        for relative in existing.keys() {
+            if !seen.contains(relative) {
+                storage.delete_chunks_for_path(folder_id, relative)?;
+                storage.delete_document(folder_id, relative)?;
+                summary.files_removed += 1;
+            }
         }
+    } else {
+        tracing::warn!(
+            folder_id,
+            "recorrido incompleto; se conservan registros no vistos"
+        );
     }
 
-    storage.set_folder_status(folder_id, FolderStatus::Indexed, total as i64)?;
+    let indexed_files = storage.list_documents(folder_id)?.len() as i64;
+    storage.set_folder_status(folder_id, FolderStatus::Indexed, indexed_files)?;
 
     report(IndexProgress {
         folder_id: folder_id.to_string(),
@@ -704,6 +771,51 @@ mod tests {
         .expect("tercera");
         assert_eq!(third.files_indexed, 1);
         assert_eq!(third.files_skipped, 1);
+    }
+
+    #[test]
+    fn la_reindexacion_aplica_cambios_de_opciones_a_archivos_inalterados() {
+        let dir = TemporalDir::new("opciones");
+        dir.write("uno.md", "# Uno\n\ntexto uno\n");
+
+        let mut storage = Storage::open_in_memory().expect("abre");
+        let folder = Folder::new(dir.path.to_string_lossy().to_string(), "docs");
+        storage.upsert_folder(&folder).expect("guarda");
+        let mut sin_progreso = |_| {};
+
+        let first = index_folder(
+            &mut storage,
+            &folder.id,
+            &dir.path,
+            &options(),
+            &mut sin_progreso,
+        )
+        .expect("primera indexación");
+        assert_eq!(first.files_indexed, 1);
+        let previous = storage
+            .get_document(&folder.id, "uno.md")
+            .expect("lee documento")
+            .expect("existe")
+            .processing_hash;
+
+        let mut changed = options();
+        changed.chunking.max_chars += 1;
+        let second = index_folder(
+            &mut storage,
+            &folder.id,
+            &dir.path,
+            &changed,
+            &mut sin_progreso,
+        )
+        .expect("reindexa con nuevas opciones");
+
+        assert_eq!(second.files_indexed, 1);
+        assert_eq!(second.files_skipped, 0);
+        let current = storage
+            .get_document(&folder.id, "uno.md")
+            .expect("lee documento actualizado")
+            .expect("sigue existiendo");
+        assert_ne!(current.processing_hash, previous);
     }
 
     #[test]

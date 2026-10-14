@@ -19,6 +19,12 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
   liberar los clientes. El aviso de privacidad vuelve a mostrarse cuando cambia
   su versión e informa del historial que se envía al proveedor y del
   almacenamiento no cifrado de las claves.
+- **Fase 2 de correcciones 2.2.0 — índice fiable**: los documentos guardan una
+  huella de las opciones, versión del pipeline y herramientas externas; cambiar
+  chunking, embeddings, OCR o instalar Tesseract/Poppler/LibreOffice fuerza una
+  reindexación aunque los bytes del archivo no cambien. Si el recorrido del
+  sistema de archivos es incompleto, no se borran del índice rutas no vistas.
+  SQLite espera hasta 5 segundos ante escrituras concurrentes.
 
 ## [2.1.0] - 2026-10-14
 

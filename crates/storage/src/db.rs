@@ -37,6 +37,10 @@ impl Storage {
 
     /// Configura los pragmas recomendados antes de aplicar migraciones.
     fn configure(conn: &Connection) -> Result<()> {
+        // La UI, el indexador y el chat tienen conexiones independientes; dar
+        // tiempo a SQLite para que otra escritura termine en lugar de fallar
+        // inmediatamente con SQLITE_BUSY.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         // `journal_mode` devuelve una fila con el modo resultante.
         conn.query_row("PRAGMA journal_mode = WAL", [], |_| Ok(()))?;
         conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA synchronous = NORMAL;")?;
@@ -96,9 +100,26 @@ mod tests {
     }
 
     #[test]
+    fn configura_un_tiempo_de_espera_para_escrituras_concurrentes() {
+        let storage = Storage::open_in_memory().expect("abre en memoria");
+        let timeout: i64 = storage
+            .connection()
+            .pragma_query_value(None, "busy_timeout", |row| row.get(0))
+            .expect("lee busy_timeout");
+        assert_eq!(timeout, 5_000);
+    }
+
+    #[test]
     fn se_crean_todas_las_tablas_del_esquema() {
         let storage = Storage::open_in_memory().expect("abre en memoria");
-        for table in ["folders", "chunks", "sessions", "messages", "artifacts"] {
+        for table in [
+            "folders",
+            "documents",
+            "chunks",
+            "sessions",
+            "messages",
+            "artifacts",
+        ] {
             let count: i64 = storage
                 .connection()
                 .query_row(
@@ -109,6 +130,20 @@ mod tests {
                 .expect("consulta sqlite_master");
             assert_eq!(count, 1, "falta la tabla `{table}`");
         }
+    }
+
+    #[test]
+    fn documentos_persisten_la_huella_del_pipeline() {
+        let storage = Storage::open_in_memory().expect("abre en memoria");
+        let count: i64 = storage
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('documents') WHERE name = 'processing_hash'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("consulta columnas");
+        assert_eq!(count, 1);
     }
 
     #[test]

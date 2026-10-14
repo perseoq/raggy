@@ -94,8 +94,8 @@ impl Storage {
     /// Lista los documentos de una carpeta.
     pub fn list_documents(&self, folder_id: &str) -> Result<Vec<Document>> {
         let mut stmt = self.connection().prepare(
-            "SELECT id, folder_id, relative_path, content_hash, size_bytes, modified_at,
-                    indexed_at, chunk_count
+            "SELECT id, folder_id, relative_path, content_hash, processing_hash, size_bytes,
+                    modified_at, indexed_at, chunk_count
              FROM documents WHERE folder_id = ?1 ORDER BY relative_path ASC",
         )?;
         let rows = stmt.query_map([folder_id], row_to_document)?;
@@ -107,8 +107,8 @@ impl Storage {
         let document = self
             .connection()
             .query_row(
-                "SELECT id, folder_id, relative_path, content_hash, size_bytes, modified_at,
-                        indexed_at, chunk_count
+                "SELECT id, folder_id, relative_path, content_hash, processing_hash, size_bytes,
+                        modified_at, indexed_at, chunk_count
                  FROM documents WHERE folder_id = ?1 AND relative_path = ?2",
                 params![folder_id, relative_path],
                 row_to_document,
@@ -121,11 +121,13 @@ impl Storage {
     pub fn upsert_document(&self, document: &Document) -> Result<()> {
         self.connection().execute(
             "INSERT INTO documents
-                 (id, folder_id, relative_path, content_hash, size_bytes, modified_at, indexed_at, chunk_count)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 (id, folder_id, relative_path, content_hash, processing_hash, size_bytes,
+                  modified_at, indexed_at, chunk_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(folder_id, relative_path) DO UPDATE SET
-                 content_hash = excluded.content_hash,
-                 size_bytes = excluded.size_bytes,
+                  content_hash = excluded.content_hash,
+                  processing_hash = excluded.processing_hash,
+                  size_bytes = excluded.size_bytes,
                  modified_at = excluded.modified_at,
                  indexed_at = excluded.indexed_at,
                  chunk_count = excluded.chunk_count",
@@ -134,6 +136,7 @@ impl Storage {
                 document.folder_id,
                 document.relative_path,
                 document.content_hash,
+                document.processing_hash,
                 document.size_bytes,
                 document.modified_at,
                 document.indexed_at,
@@ -553,10 +556,11 @@ fn row_to_document(row: &Row<'_>) -> rusqlite::Result<Document> {
         folder_id: row.get(1)?,
         relative_path: row.get(2)?,
         content_hash: row.get(3)?,
-        size_bytes: row.get(4)?,
-        modified_at: row.get(5)?,
-        indexed_at: row.get(6)?,
-        chunk_count: row.get(7)?,
+        processing_hash: row.get(4)?,
+        size_bytes: row.get(5)?,
+        modified_at: row.get(6)?,
+        indexed_at: row.get(7)?,
+        chunk_count: row.get(8)?,
     })
 }
 

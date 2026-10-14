@@ -156,7 +156,7 @@ impl Message {
     }
 }
 
-/// Archivo Markdown rastreado dentro de una carpeta (HU-02, HU-03).
+/// Archivo indexable rastreado dentro de una carpeta (HU-02, HU-03).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Document {
     /// Identificador único.
@@ -167,6 +167,8 @@ pub struct Document {
     pub relative_path: String,
     /// Hash del contenido completo del archivo.
     pub content_hash: String,
+    /// Huella de la versión del extractor y sus opciones de procesamiento.
+    pub processing_hash: String,
     /// Tamaño en bytes.
     pub size_bytes: i64,
     /// Fecha de modificación en milisegundos desde la época UNIX.
@@ -183,6 +185,7 @@ impl Document {
         folder_id: impl Into<String>,
         relative_path: impl Into<String>,
         content_hash: impl Into<String>,
+        processing_hash: impl Into<String>,
         size_bytes: i64,
         modified_at: i64,
         chunk_count: i64,
@@ -192,6 +195,7 @@ impl Document {
             folder_id: folder_id.into(),
             relative_path: relative_path.into(),
             content_hash: content_hash.into(),
+            processing_hash: processing_hash.into(),
             size_bytes,
             modified_at,
             indexed_at: chrono::Utc::now().to_rfc3339(),
