@@ -1,0 +1,16 @@
+[package]
+name = "localmind-ui"
+description = "Interfaz gráfica de escritorio de LocalMind (egui/eframe)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+localmind-core.workspace = true
+eframe.workspace = true
+egui.workspace = true
+tracing.workspace = true

@@ -1,0 +1,26 @@
+[package]
+name = "localmind-app"
+description = "Binario principal que integra todas las capas de LocalMind."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[[bin]]
+name = "raggy"
+path = "src/main.rs"
+
+[dependencies]
+localmind-core.workspace = true
+localmind-llm.workspace = true
+localmind-rag.workspace = true
+localmind-storage.workspace = true
+localmind-ui.workspace = true
+
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

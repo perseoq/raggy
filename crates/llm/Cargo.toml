@@ -1,0 +1,14 @@
+[package]
+name = "localmind-llm"
+description = "Abstracción multi-proveedor de LLM (OpenAI, Anthropic, DeepSeek, OpenRouter)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true

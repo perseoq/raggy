@@ -1,0 +1,62 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/llm",
+    "crates/rag",
+    "crates/storage",
+    "crates/ui",
+    "crates/app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+authors = ["perseoq"]
+repository = "https://github.com/perseoq/raggy"
+homepage = "https://github.com/perseoq/raggy"
+
+[workspace.dependencies]
+# --- crates internos ---
+localmind-core = { path = "crates/core" }
+localmind-llm = { path = "crates/llm" }
+localmind-rag = { path = "crates/rag" }
+localmind-storage = { path = "crates/storage" }
+localmind-ui = { path = "crates/ui" }
+
+# --- runtime / errores ---
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "sync", "fs", "time"] }
+anyhow = "1.0"
+thiserror = "2.0"
+
+# --- serialización ---
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "1.1"
+
+# --- logging ---
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# --- persistencia ---
+rusqlite = { version = "0.40", features = ["bundled"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.0", features = ["v4"] }
+
+# --- rutas del sistema ---
+directories = "6.0"
+
+# --- interfaz gráfica ---
+eframe = { version = "0.36", default-features = false, features = [
+    "glow",
+    "x11",
+    "default_fonts",
+] }
+egui = "0.36"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
