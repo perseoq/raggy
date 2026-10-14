@@ -9,6 +9,13 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [1.0.24] - 2026-10-14
+
+### Cambiado
+
+- El **cuadro de texto y el botón «Enviar»** del chat son un poco más altos (más
+  relleno interior en el campo; el botón mantiene la misma altura que el campo).
+
 ## [1.0.23] - 2026-10-14
 
 ### Cambiado
@@ -148,7 +155,8 @@ Primera versión estable: cubre las 32 historias de usuario de `hu.md`.
   (arm64) y Windows, se empaquetan con sus checksums SHA-256 y se publican en
   GitHub Releases.
 
-[No publicado]: https://github.com/perseoq/raggy/compare/v1.0.23...HEAD
+[No publicado]: https://github.com/perseoq/raggy/compare/v1.0.24...HEAD
+[1.0.24]: https://github.com/perseoq/raggy/releases/tag/v1.0.24
 [1.0.23]: https://github.com/perseoq/raggy/releases/tag/v1.0.23
 [1.0.22]: https://github.com/perseoq/raggy/releases/tag/v1.0.22
 [1.0.21]: https://github.com/perseoq/raggy/releases/tag/v1.0.21

@@ -1950,6 +1950,7 @@ impl RaggyApp {
                             egui::TextEdit::multiline(&mut input)
                                 .desired_rows(2)
                                 .desired_width(text_width)
+                                .margin(egui::Margin::symmetric(8, 8))
                                 .hint_text("Escribe tu pregunta…"),
                         );
                         focused = response.has_focus();
