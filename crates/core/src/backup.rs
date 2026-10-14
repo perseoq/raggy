@@ -61,25 +61,29 @@ pub fn export_backup(
     ));
     storage.backup_to(&snapshot)?;
 
-    let mut sources: Vec<(String, std::path::PathBuf)> =
-        vec![("raggy.sqlite3".to_string(), snapshot.clone())];
-    if paths.config_path().is_file() {
-        sources.push(("config.toml".to_string(), paths.config_path()));
+    let mut payloads: Vec<(String, Vec<u8>)> = vec![(
+        "raggy.sqlite3".to_string(),
+        fs::read(&snapshot).map_err(|source| CoreError::Io {
+            path: snapshot.clone(),
+            source,
+        })?,
+    )];
+
+    // La configuración se incluye sin las claves de API.
+    if paths.settings_path().is_file() {
+        payloads.push((
+            "settings.json".to_string(),
+            sanitized_settings(&paths.settings_path()),
+        ));
     }
 
     let mut entries = Vec::new();
-    let mut payloads = Vec::new();
-    for (name, path) in &sources {
-        let bytes = fs::read(path).map_err(|source| CoreError::Io {
-            path: path.clone(),
-            source,
-        })?;
+    for (name, data) in &payloads {
         entries.push(ManifestEntry {
             name: name.clone(),
-            size: bytes.len() as u64,
-            hash: hash_bytes(&bytes),
+            size: data.len() as u64,
+            hash: hash_bytes(data),
         });
-        payloads.push((name.clone(), bytes));
     }
 
     let manifest = Manifest {
@@ -204,6 +208,21 @@ fn is_safe_name(name: &str) -> bool {
         && !name.starts_with('.')
 }
 
+/// Devuelve `settings.json` sin las claves de API, para no filtrarlas (HU-29).
+fn sanitized_settings(path: &Path) -> Vec<u8> {
+    let mut value: serde_json::Value = fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .filter(serde_json::Value::is_object)
+        .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+
+    if let serde_json::Value::Object(map) = &mut value {
+        map.remove("api_keys");
+    }
+
+    serde_json::to_vec_pretty(&value).unwrap_or_default()
+}
+
 fn hash_bytes(bytes: &[u8]) -> String {
     blake3::hash(bytes).to_hex().to_string()
 }
@@ -228,8 +247,14 @@ mod tests {
     #[test]
     fn exporta_e_importa_con_integridad() {
         let source = temp_dir("origen");
-        let source_paths = AppPaths::with_data_dir(&source);
+        let source_paths = AppPaths::with_home(&source);
         source_paths.ensure_dirs().expect("crea árbol");
+
+        std::fs::write(
+            source_paths.settings_path(),
+            r#"{"theme":"dark","api_keys":{"deepseek":"super-secreto"}}"#,
+        )
+        .expect("escribe settings.json");
 
         let storage = Storage::open(&source_paths.db_path()).expect("abre la base de datos");
         storage
@@ -247,8 +272,22 @@ mod tests {
         assert!(archive.is_file());
         drop(storage);
 
+        // El respaldo conserva la configuración pero no las claves (HU-29).
+        let file = fs::File::open(&archive).expect("abre el paquete");
+        let mut zip = zip::ZipArchive::new(file).expect("zip válido");
+        let mut settings = String::new();
+        zip.by_name("settings.json")
+            .expect("settings.json incluido")
+            .read_to_string(&mut settings)
+            .expect("lee settings");
+        assert!(settings.contains("dark"), "{settings}");
+        assert!(
+            !settings.contains("super-secreto"),
+            "el respaldo no debe incluir la clave: {settings}"
+        );
+
         let target = temp_dir("destino");
-        let target_paths = AppPaths::with_data_dir(&target);
+        let target_paths = AppPaths::with_home(&target);
         let restored = import_backup(&archive, &target_paths).expect("importa");
         assert_eq!(restored.files, summary.files);
 
@@ -264,7 +303,7 @@ mod tests {
     #[test]
     fn rechaza_un_paquete_corrupto() {
         let source = temp_dir("corrupto");
-        let source_paths = AppPaths::with_data_dir(&source);
+        let source_paths = AppPaths::with_home(&source);
         source_paths.ensure_dirs().expect("crea árbol");
         let storage = Storage::open(&source_paths.db_path()).expect("abre");
         let archive = source.join("respaldo.zip");
@@ -280,7 +319,7 @@ mod tests {
         fs::write(&broken, corrupted).expect("escribe");
 
         let target = temp_dir("corrupto-destino");
-        let target_paths = AppPaths::with_data_dir(&target);
+        let target_paths = AppPaths::with_home(&target);
         let result = import_backup(&broken, &target_paths);
         assert!(result.is_err(), "un paquete corrupto no debe importarse");
 

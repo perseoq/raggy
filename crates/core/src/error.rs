@@ -55,6 +55,10 @@ pub enum CoreError {
     /// Fallo al deserializar la configuración desde TOML.
     #[error("no se pudo interpretar la configuración: {0}")]
     Deserialize(#[from] toml::de::Error),
+
+    /// Fallo al leer o escribir el archivo de configuración JSON.
+    #[error("no se pudo procesar settings.json: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 /// Alias de resultado para el núcleo.

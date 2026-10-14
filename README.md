@@ -1,5 +1,8 @@
 # Raggy Desktop (raggy)
 
+[![CI](https://github.com/perseoq/raggy/actions/workflows/ci.yml/badge.svg)](https://github.com/perseoq/raggy/actions/workflows/ci.yml)
+[![Release](https://github.com/perseoq/raggy/actions/workflows/release.yml/badge.svg)](https://github.com/perseoq/raggy/actions/workflows/release.yml)
+
 Asistente de IA de escritorio, escrito en Rust, que responde **anclado únicamente
 a documentación Markdown local**. Indexas una carpeta, creas sesiones aisladas
 por carpeta y chateas con distintos proveedores de LLM (OpenAI, Anthropic,
@@ -33,9 +36,10 @@ DeepSeek, OpenRouter), generando y descargando código trazable.
 ### Fase 0 — cimientos
 
 - Workspace de Cargo con los 6 crates previstos en `tech.md`.
-- Configuración persistente (`config.toml`) con validación y valores por defecto
+- Configuración persistente (`settings.json`) con validación y valores por defecto
   acordes a las HU (temperatura 0.1, `top-k` 5, umbral 0.3).
-- Resolución de directorios de datos multiplataforma (`RAGGY_DATA_DIR`).
+- Resolución de la carpeta base multiplataforma (`~/.raggydesktop`, ajustable con
+  `RAGGY_HOME`).
 - Persistencia SQLite con migraciones versionadas (`PRAGMA user_version`).
 - Interfaz `egui`/`eframe`, registro con `tracing` y CI en GitHub Actions.
 
@@ -97,11 +101,11 @@ DeepSeek, OpenRouter), generando y descargando código trazable.
 - **Citas verificables** (HU-11): cada respuesta guarda y muestra sus fuentes;
   las citas son enlaces que abren el archivo y su fragmento.
 
-> Las API Keys se guardan **cifradas en el llavero del sistema** (Windows
-> Credential Manager, macOS Keychain o Secret Service en Linux). Como
-> alternativa, si no hay llavero disponible se leen de las variables de entorno
-> `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY` y
-> `OPENROUTER_API_KEY`.
+> La configuración y las claves de API se guardan en
+> **`~/.raggydesktop/settings.json`** (JSON, con permisos restringidos al
+> propietario cuando el sistema lo permite). Como alternativa, si no hay clave en
+> el archivo se leen las variables de entorno `OPENAI_API_KEY`,
+> `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY` y `OPENROUTER_API_KEY`.
 
 ### Fase 4 — claves, prueba de conexión y fallback (HU-23 a HU-25)
 
@@ -118,9 +122,10 @@ DeepSeek, OpenRouter), generando y descargando código trazable.
 - El chat ahora advierte cuando al proveedor seleccionado le falta la clave y
   ofrece configurarla en el acto.
 
-> Nota sobre el almacén: en Linux el llavero debe estar desbloqueado (GNOME
-> Keyring o KWallet). Si no está disponible, la aplicación lo indica y sigue
-> funcionando con las variables de entorno.
+> Nota de seguridad: las claves se guardan en texto plano dentro de
+> `settings.json` (el archivo se crea con permisos `0600` en Unix y las claves
+> nunca se registran en los logs). Si prefieres no persistirlas, deja
+> `api_keys` vacío y usa las variables de entorno.
 
 ### Fase 5 — generación, descarga de código y memoria (HU-16 a HU-22)
 
@@ -164,21 +169,43 @@ DeepSeek, OpenRouter), generando y descargando código trazable.
   (instantánea consistente) y la configuración, más un manifiesto con el hash de
   cada archivo que se **valida antes de restaurar**.
 
+## Instalación
+
+Descarga el binario de tu plataforma desde la página de
+[releases](https://github.com/perseoq/raggy/releases). Cada paquete incluye un
+archivo `raggy-<versión>-<plataforma>.tar.gz` (o `.zip` en Windows) con su
+checksum SHA-256.
+
+Al ejecutarlo por primera vez se crea `~/.raggydesktop/` con la configuración y
+la base de datos. Las claves de API se pueden introducir desde el propio programa
+(ventana **Claves de API**) o con las variables de entorno.
+
+## Uso
+
+1. **Añadir carpeta**: indexa una carpeta con documentación Markdown.
+2. **Explorar**: busca en el índice y revisa los fragmentos recuperados con sus
+   citas.
+3. **Nueva sesión**: abre un chat aislado sobre esa carpeta.
+4. **Descargar código**: los bloques de las respuestas se previsualizan,
+   copian y descargan con su nombre declarado; quedan registrados en
+   **Artefactos**.
+5. **Configuración**: tema, parámetros del RAG, directorio de datos y respaldos.
+
 ## Estructura del proyecto
 
 ```
 raggy/
 ├── Cargo.toml                  # workspace y dependencias compartidas
 ├── crates/
-│   ├── core/                   # configuración, rutas, errores, indexación y watcher
-│   │   └── tests/              # prueba de integración del pipeline completo
-│   ├── llm/                    # contrato multi-proveedor de LLM
+│   ├── core/                   # configuración, rutas, indexación, chat, respaldo
+│   │   └── tests/              # pruebas de integración de los pipelines
+│   ├── llm/                    # contrato multi-proveedor, SSE y prompt estricto
 │   ├── rag/                    # chunking semántico, embeddings y recuperación
 │   ├── storage/                # SQLite, migraciones y repositorio
 │   │   └── migrations/         # SQL versionado del esquema
 │   ├── ui/                     # interfaz egui/eframe
 │   └── app/                    # binario `raggy`
-└── .github/workflows/ci.yml    # integración continua
+└── .github/workflows/          # integración continua y publicación
 ```
 
 ## Requisitos
@@ -192,22 +219,26 @@ raggy/
 
 ```bash
 cargo build --release      # compila todo el workspace
-cargo run -p raggy-app # abre la ventana (crea el directorio de datos)
+cargo run -p raggy-app     # abre la ventana (crea la carpeta base)
 cargo test --workspace     # ejecuta las pruebas
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
 
-Los datos se guardan en el directorio estándar del sistema
-(`~/.local/share/raggy` en Linux). Para aislarlos durante el desarrollo:
+La carpeta base es `~/.raggydesktop`, donde viven `settings.json`, la base de
+datos, los índices, los artefactos y los registros (`logs/`). Para aislarlos
+durante el desarrollo:
 
 ```bash
-RAGGY_DATA_DIR=./raggy-data cargo run -p raggy-app
+RAGGY_HOME=./raggy-home cargo run -p raggy-app
 ```
 
 El nivel de registro se controla con `RUST_LOG` (por ejemplo,
-`RUST_LOG=debug cargo run -p raggy-app`).
+`RUST_LOG=debug cargo run -p raggy-app`). Los registros se escriben también en
+`<directorio de datos>/logs/` con rotación diaria.
 
 ## Licencia
 
-MIT.
+MIT — consulta [`LICENSE`](LICENSE).
+
+Los cambios relevantes se documentan en [`CHANGELOG.md`](CHANGELOG.md).

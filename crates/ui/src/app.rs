@@ -13,8 +13,8 @@ use raggy_core::index::{IndexEvent, IndexOptions, IndexPhase, IndexWorker};
 use raggy_core::watch::FolderWatcher;
 use raggy_core::{
     artifacts_for_prompt, relative_to, resolve_key, save_artifact, search_folder, AppConfig,
-    AppPaths, ChatEvent, ChatWorker, ConflictPolicy, KeyringStore, ProviderFactory, RagConfig,
-    SaveOutcome, SecretStore, Theme, APP_NAME, APP_VERSION,
+    AppPaths, ChatEvent, ChatWorker, ConflictPolicy, ProviderFactory, RagConfig, SaveOutcome,
+    SecretStore, SettingsStore, Theme, APP_NAME, APP_VERSION,
 };
 use raggy_llm::{extract_code_blocks, suggest_filename, CodeBlock, ProviderId};
 use raggy_rag::{Chunk, ChunkingOptions, RetrievedChunk, RetrieverOptions};
@@ -188,7 +188,6 @@ pub struct RaggyApp {
     settings_open: bool,
     settings_draft: RagConfig,
     secrets: Arc<dyn SecretStore>,
-    keyring_available: bool,
     keys_open: bool,
     key_inputs: HashMap<ProviderId, String>,
     key_status: HashMap<ProviderId, KeyStatus>,
@@ -214,8 +213,7 @@ impl RaggyApp {
     pub fn new(ctx: &eframe::CreationContext<'_>, config: AppConfig, paths: AppPaths) -> Self {
         crate::theme::apply(ctx, config.theme);
         let settings_draft = config.rag.clone();
-        let secrets: Arc<dyn SecretStore> = Arc::new(KeyringStore::new());
-        let keyring_available = KeyringStore::is_available();
+        let secrets: Arc<dyn SecretStore> = Arc::new(SettingsStore::new(paths.settings_path()));
         let (test_tx, test_rx) = mpsc::channel();
 
         let mut app = Self {
@@ -245,7 +243,6 @@ impl RaggyApp {
             settings_open: false,
             settings_draft,
             secrets,
-            keyring_available,
             keys_open: false,
             key_inputs: HashMap::new(),
             key_status: HashMap::new(),
@@ -2207,7 +2204,7 @@ impl RaggyApp {
         let mut open = true;
         let mut actions: Vec<KeyAction> = Vec::new();
         let statuses = self.key_status.clone();
-        let keyring_available = self.keyring_available;
+        let settings_path = self.paths.settings_path();
 
         egui::Window::new("Claves de API")
             .open(&mut open)
@@ -2216,16 +2213,11 @@ impl RaggyApp {
             .default_width(660.0)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
-                if !keyring_available {
-                    ui.colored_label(
-                        egui::Color32::from_rgb(200, 140, 0),
-                        "El llavero del sistema no está disponible; se usarán las variables de entorno.",
-                    );
-                }
-                ui.small(
-                    "Las claves se guardan cifradas en el almacén del sistema operativo \
-                     y nunca se muestran completas.",
-                );
+                ui.small(format!(
+                    "Las claves se guardan en {} (con permisos restringidos) y también se pueden \
+                     definir por variables de entorno. Nunca se muestran completas.",
+                    settings_path.display()
+                ));
                 ui.add_space(8.0);
 
                 egui::Grid::new("keys_grid")
@@ -2378,7 +2370,11 @@ impl RaggyApp {
                 ui.add_space(8.0);
                 ui.separator();
                 ui.strong("Directorio de datos");
-                ui.small(format!("Actual: {}", current_dir.display()));
+                ui.small(format!(
+                    "Configuración: {}",
+                    self.paths.settings_path().display()
+                ));
+                ui.small(format!("Datos: {}", current_dir.display()));
                 ui.horizontal(|ui| {
                     if ui.button("Cambiar carpeta…").clicked() {
                         pick_directory = true;
@@ -2440,7 +2436,7 @@ impl RaggyApp {
         if let Some(theme) = theme_change {
             self.config.theme = theme;
             ctx.set_theme(crate::theme::preference(theme));
-            if let Err(error) = self.config.save(&self.paths.config_path()) {
+            if let Err(error) = self.config.save(&self.paths.settings_path()) {
                 tracing::warn!("no se pudo guardar el tema: {error}");
             }
         }
@@ -2474,7 +2470,7 @@ impl RaggyApp {
             match candidate.validate() {
                 Ok(()) => {
                     self.config = candidate;
-                    match self.config.save(&self.paths.config_path()) {
+                    match self.config.save(&self.paths.settings_path()) {
                         Ok(()) => {
                             self.status = "Configuración guardada. Reindexa para aplicar cambios \
                                  de fragmentación o embeddings."
@@ -2494,11 +2490,14 @@ impl RaggyApp {
     }
 
     /// Aplica el nuevo directorio de datos, migrando o no (HU-28).
+    ///
+    /// El directorio se guarda en `settings.json` (`data_dir`) y se aplica al
+    /// reiniciar.
     fn apply_data_dir(&mut self, migrate: bool) {
         let Some(directory) = self.data_dir_draft.clone() else {
             return;
         };
-        let target = AppPaths::with_data_dir(&directory);
+        let target = AppPaths::with_data_dir(&self.paths.home_dir, &directory);
         if target.data_dir == self.paths.data_dir {
             self.data_dir_draft = None;
             return;
@@ -2533,8 +2532,10 @@ impl RaggyApp {
             );
         }
 
-        if let Err(error) = raggy_core::set_location(&directory) {
-            self.status = format!("No se pudo guardar la ubicación: {error}");
+        // El directorio de datos se recuerda en settings.json.
+        self.config.data_dir = Some(directory);
+        if let Err(error) = self.config.save(&self.paths.settings_path()) {
+            self.status = format!("No se pudo guardar settings.json: {error}");
             return;
         }
         self.data_dir_draft = None;
@@ -2668,7 +2669,7 @@ impl RaggyApp {
 
         if accept {
             self.config.data_notice_acknowledged = true;
-            if let Err(error) = self.config.save(&self.paths.config_path()) {
+            if let Err(error) = self.config.save(&self.paths.settings_path()) {
                 tracing::warn!("no se pudo guardar el aviso de privacidad: {error}");
             }
         }
@@ -2853,6 +2854,12 @@ impl eframe::App for RaggyApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 
+        // Recuerda el tamaño de la ventana para restaurarlo en el próximo arranque.
+        let size = ui.max_rect().size();
+        if size.x > 1.0 && size.y > 1.0 {
+            self.config.window_size = Some([size.x, size.y]);
+        }
+
         self.drain_events();
         self.drain_chat_events();
         self.drain_key_tests();
@@ -2874,8 +2881,14 @@ impl eframe::App for RaggyApp {
     }
 
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {
-        if let Err(error) = self.config.save(&self.paths.config_path()) {
+        if let Err(error) = self.config.save(&self.paths.settings_path()) {
             tracing::warn!("no se pudo guardar la configuración al cerrar: {error}");
+        }
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if let Err(error) = self.config.save(&self.paths.settings_path()) {
+            tracing::warn!("no se pudo guardar la configuración al salir: {error}");
         }
     }
 }

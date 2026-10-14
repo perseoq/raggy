@@ -32,11 +32,12 @@ pub use index::{
     IndexProgress, IndexSummary, IndexWorker,
 };
 pub use paths::{
-    default_data_dir, location_file, migrate_data, resolve, resolve_from, set_location, AppPaths,
-    LocationConfig,
+    home_dir, migrate_data, resolve, resolve_from, AppPaths, HOME_DIR_NAME, HOME_ENV, SETTINGS_FILE,
 };
 pub use search::{build_retriever, embedding_coverage, search_folder, EmbeddingCoverage};
-pub use secrets::{mask, resolve_key, KeyringStore, MemoryStore, Secret, SecretError, SecretStore};
+pub use secrets::{
+    mask, resolve_key, MemoryStore, Secret, SecretError, SecretStore, SettingsStore,
+};
 pub use watch::FolderWatcher;
 
 /// Nombre comercial del producto.

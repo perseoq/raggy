@@ -1,25 +1,33 @@
 //! Punto de entrada de Raggy Desktop.
 //!
-//! Fase 0: inicializa el registro de eventos, resuelve rutas, carga la
-//! configuración, abre la base de datos con sus migraciones y lanza la ventana.
+//! Inicializa los registros (consola y archivo con rotación diaria), instala un
+//! gancho de pánico, resuelve rutas, carga la configuración, abre la base de
+//! datos con sus migraciones y lanza la ventana.
+
+use std::path::Path;
 
 use anyhow::Context;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::EnvFilter;
 
 use raggy_core::{AppConfig, APP_NAME, APP_VERSION};
 use raggy_storage::Storage;
 
 fn main() -> anyhow::Result<()> {
-    init_tracing();
-
     let paths =
         raggy_core::paths::resolve().context("no se pudo resolver el directorio de datos")?;
     paths
         .ensure_dirs()
         .context("no se pudieron crear los directorios de datos")?;
 
-    let config = AppConfig::load_or_default(&paths.config_path());
-    if !paths.config_path().exists() {
-        if let Err(err) = config.save(&paths.config_path()) {
+    // El guardián del registro en archivo debe vivir hasta el final del proceso.
+    let _log_guard = init_tracing(&paths.logs_dir());
+    install_panic_hook();
+
+    let config = AppConfig::load_or_default(&paths.settings_path());
+    if !paths.settings_path().exists() {
+        if let Err(err) = config.save(&paths.settings_path()) {
             tracing::warn!("no se pudo escribir la configuración por defecto: {err}");
         }
     }
@@ -29,16 +37,16 @@ fn main() -> anyhow::Result<()> {
 
     tracing::info!(
         version = APP_VERSION,
+        home_dir = %paths.home_dir.display(),
         data_dir = %paths.data_dir.display(),
+        settings = %paths.settings_path().display(),
         schema_version,
         providers = raggy_llm::ProviderId::ALL.len(),
-        top_k = raggy_rag::RetrieverOptions::default().top_k,
-        "cimientos cargados"
+        top_k = config.rag.top_k,
+        "arrancando"
     );
 
-    tracing::info!("arrancando interfaz");
-    raggy_ui::run(config, paths)
-        .map_err(|err| anyhow::anyhow!("fallo al ejecutar la interfaz: {err}"))?;
+    localmind_ui_run(config, paths)?;
 
     // Mantener el manejador de almacenamiento vivo durante toda la sesión.
     drop(storage);
@@ -46,13 +54,56 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Inicializa `tracing` respetando la variable de entorno `RUST_LOG`.
-fn init_tracing() {
-    use tracing_subscriber::EnvFilter;
+fn localmind_ui_run(config: AppConfig, paths: raggy_core::AppPaths) -> anyhow::Result<()> {
+    raggy_ui::run(config, paths)
+        .map_err(|err| anyhow::anyhow!("fallo al ejecutar la interfaz: {err}"))
+}
 
+/// Inicializa `tracing` con salida a consola y a un archivo con rotación diaria.
+///
+/// Devuelve el guardián del escritor asíncrono, que debe mantenerse vivo.
+fn init_tracing(logs_dir: &Path) -> Option<tracing_appender::non_blocking::WorkerGuard> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
+    let stderr_layer = tracing_subscriber::fmt::layer()
         .with_target(false)
-        .init();
+        .with_writer(std::io::stderr);
+
+    match tracing_appender::rolling::RollingFileAppender::builder()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix("raggy")
+        .filename_suffix("log")
+        .build(logs_dir)
+    {
+        Ok(appender) => {
+            let (writer, guard) = tracing_appender::non_blocking(appender);
+            let file_layer = tracing_subscriber::fmt::layer()
+                .with_target(false)
+                .with_ansi(false)
+                .with_writer(writer);
+
+            tracing_subscriber::registry()
+                .with(filter)
+                .with(stderr_layer)
+                .with(file_layer)
+                .init();
+            Some(guard)
+        }
+        Err(error) => {
+            eprintln!("no se pudieron escribir registros en disco: {error}");
+            tracing_subscriber::registry()
+                .with(filter)
+                .with(stderr_layer)
+                .init();
+            None
+        }
+    }
+}
+
+/// Registra los pánicos en el archivo de registros antes de abortar.
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        tracing::error!("pánico no controlado: {info}");
+        default_hook(info);
+    }));
 }

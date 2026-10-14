@@ -8,6 +8,9 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
+readme = "../../README.md"
+keywords = ["rag", "markdown", "llm", "desktop", "retrieval"]
+categories = ["gui", "development-tools"]
 
 [[bin]]
 name = "raggy"
@@ -24,3 +27,4 @@ anyhow.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+tracing-appender.workspace = true

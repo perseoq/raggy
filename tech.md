@@ -94,6 +94,13 @@ A continuación, las tecnologías necesarias para construir este software, todas
 
 **Recomendación:** `keyring` como base, con `secrecy` para manejar secretos en memoria.
 
+> **Decisión de implementación (v0.1.0):** las claves se guardan en
+> `~/.raggydesktop/settings.json` junto al resto de la configuración, con
+> permisos restringidos al propietario (`0600` en Unix). Se mantiene un tipo
+> `Secret` interno que redacta el valor en `Debug`/`Display` y lo borra de
+> memoria al liberarlo, y las variables de entorno siguen sirviendo como
+> alternativa. El llavero del sistema queda como mejora futura.
+
 ---
 
 ## 6. Componentes Complementarios

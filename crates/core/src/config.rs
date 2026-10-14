@@ -4,7 +4,8 @@
 //! parámetros del RAG (HU-27), temperatura bloqueada por defecto (HU-13) y
 //! proveedor/modelo por defecto (HU-15).
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -129,6 +130,12 @@ pub struct AppConfig {
     pub model: ModelConfig,
     /// Si el usuario ya ha visto el aviso de privacidad (HU-30).
     pub data_notice_acknowledged: bool,
+    /// Último tamaño de la ventana en píxeles lógicos, para restaurarlo.
+    pub window_size: Option<[f32; 2]>,
+    /// Directorio de datos alternativo; si falta, se usa la carpeta base.
+    pub data_dir: Option<PathBuf>,
+    /// Claves de API por proveedor (clave del proveedor → token).
+    pub api_keys: HashMap<String, String>,
 }
 
 impl Default for AppConfig {
@@ -139,18 +146,21 @@ impl Default for AppConfig {
             rag: RagConfig::default(),
             model: ModelConfig::default(),
             data_notice_acknowledged: false,
+            window_size: None,
+            data_dir: None,
+            api_keys: HashMap::new(),
         }
     }
 }
 
 impl AppConfig {
-    /// Carga la configuración desde disco.
+    /// Carga la configuración desde `settings.json`.
     pub fn load(path: &Path) -> Result<Self> {
         let raw = std::fs::read_to_string(path).map_err(|source| CoreError::Io {
             path: path.to_path_buf(),
             source,
         })?;
-        let config: Self = toml::from_str(&raw)?;
+        let config: Self = serde_json::from_str(&raw)?;
         config.validate()?;
         Ok(config)
     }
@@ -173,7 +183,8 @@ impl AppConfig {
         }
     }
 
-    /// Guarda la configuración en disco, creando el directorio padre si falta.
+    /// Guarda la configuración en `settings.json`, creando el directorio padre
+    /// si falta y restringiendo los permisos del archivo.
     pub fn save(&self, path: &Path) -> Result<()> {
         self.validate()?;
         if let Some(parent) = path.parent() {
@@ -182,11 +193,12 @@ impl AppConfig {
                 source,
             })?;
         }
-        let serialized = toml::to_string_pretty(self)?;
+        let serialized = serde_json::to_string_pretty(self)?;
         std::fs::write(path, serialized).map_err(|source| CoreError::Io {
             path: path.to_path_buf(),
             source,
         })?;
+        restrict_permissions(path);
         Ok(())
     }
 
@@ -228,6 +240,21 @@ impl AppConfig {
         Ok(())
     }
 }
+
+/// Restringe los permisos del archivo de configuración (solo el propietario).
+#[cfg(unix)]
+pub(crate) fn restrict_permissions(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    if let Ok(metadata) = std::fs::metadata(path) {
+        let mut permissions = metadata.permissions();
+        permissions.set_mode(0o600);
+        let _ = std::fs::set_permissions(path, permissions);
+    }
+}
+
+#[cfg(not(unix))]
+pub(crate) fn restrict_permissions(_path: &Path) {}
 
 #[cfg(test)]
 mod tests {
@@ -290,15 +317,47 @@ mod tests {
         let mut dir = std::env::temp_dir();
         dir.push(format!("raggy-config-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let path = dir.join("config.toml");
+        let path = dir.join("settings.json");
 
-        let config = AppConfig {
+        let mut config = AppConfig {
             theme: Theme::Dark,
             ..AppConfig::default()
         };
+        config
+            .api_keys
+            .insert("deepseek".to_string(), "clave-de-prueba".to_string());
         config.save(&path).expect("guarda");
+
+        let raw = std::fs::read_to_string(&path).expect("lee");
+        assert!(raw.contains("\"deepseek\""), "debe ser JSON legible");
+
         let loaded = AppConfig::load(&path).expect("carga");
         assert_eq!(loaded.theme, Theme::Dark);
+        assert_eq!(
+            loaded.api_keys.get("deepseek").map(String::as_str),
+            Some("clave-de-prueba")
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restringe_los_permisos_del_archivo() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("raggy-config-perms-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("settings.json");
+
+        AppConfig::default().save(&path).expect("guarda");
+        let mode = std::fs::metadata(&path)
+            .expect("metadatos")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "el archivo con credenciales debe ser privado");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

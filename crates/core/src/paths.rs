@@ -1,47 +1,57 @@
-//! Localización de los directorios de datos de la aplicación.
+//! Rutas de la aplicación y resolución del directorio de datos.
+//!
+//! La carpeta base es `~/.raggydesktop` (configurable con `RAGGY_HOME`). Dentro
+//! vive `settings.json`, que contiene la configuración **y las claves de API**, y
+//! por defecto también la base de datos, los índices, los artefactos y los
+//! registros. La propia configuración puede apuntar a otro directorio de datos.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
 use crate::error::{CoreError, Result};
 use crate::APP_SLUG;
 
-/// Variable de entorno que permite sobrescribir el directorio de datos.
-///
-/// Útil para desarrollo, pruebas y para forzar una ubicación concreta.
-pub const DATA_DIR_ENV: &str = "RAGGY_DATA_DIR";
+/// Variable de entorno que cambia la carpeta base de la aplicación.
+pub const HOME_ENV: &str = "RAGGY_HOME";
 
-/// Archivo que recuerda la ubicación de datos elegida por el usuario (HU-28).
-pub const LOCATION_FILE: &str = "location.toml";
+/// Nombre de la carpeta base dentro del directorio personal.
+pub const HOME_DIR_NAME: &str = ".raggydesktop";
 
-/// Contenido del archivo de ubicación.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct LocationConfig {
-    /// Directorio de datos elegido; `None` usa el del sistema.
-    pub data_dir: Option<PathBuf>,
-}
+/// Archivo de configuración y credenciales.
+pub const SETTINGS_FILE: &str = "settings.json";
 
-/// Rutas canónicas usadas por la aplicación dentro del directorio de datos.
+/// Rutas canónicas usadas por la aplicación.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppPaths {
-    /// Directorio raíz de datos.
+    /// Carpeta base (`~/.raggydesktop`), donde vive `settings.json`.
+    pub home_dir: PathBuf,
+    /// Directorio de datos (base de datos, índices, artefactos y registros).
     pub data_dir: PathBuf,
 }
 
 impl AppPaths {
-    /// Construye las rutas sobre un directorio de datos explícito.
-    pub fn with_data_dir(dir: impl Into<PathBuf>) -> Self {
+    /// Construye las rutas con un directorio de datos igual a la carpeta base.
+    pub fn with_home(home: impl Into<PathBuf>) -> Self {
+        let home = home.into();
         Self {
-            data_dir: dir.into(),
+            data_dir: home.clone(),
+            home_dir: home,
         }
     }
 
-    /// Archivo de configuración (`config.toml`).
-    pub fn config_path(&self) -> PathBuf {
-        self.data_dir.join("config.toml")
+    /// Construye las rutas con una carpeta base y un directorio de datos.
+    pub fn with_data_dir(home: impl Into<PathBuf>, data_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            home_dir: home.into(),
+            data_dir: data_dir.into(),
+        }
+    }
+
+    /// Archivo de configuración y credenciales (`settings.json`).
+    pub fn settings_path(&self) -> PathBuf {
+        self.home_dir.join(SETTINGS_FILE)
     }
 
     /// Base de datos SQLite principal.
@@ -67,6 +77,7 @@ impl AppPaths {
     /// Crea el árbol de directorios si no existe.
     pub fn ensure_dirs(&self) -> Result<()> {
         for dir in [
+            self.home_dir.clone(),
             self.data_dir.clone(),
             self.indexes_dir(),
             self.artifacts_dir(),
@@ -78,65 +89,49 @@ impl AppPaths {
     }
 }
 
-/// Directorio de datos por defecto del sistema operativo.
-pub fn default_data_dir() -> Result<PathBuf> {
-    let dirs = directories::ProjectDirs::from("dev", "perseoq", APP_SLUG)
-        .ok_or(CoreError::DataDirUnavailable)?;
-    Ok(dirs.data_dir().to_path_buf())
-}
-
-/// Ruta del archivo de ubicación dentro del directorio por defecto.
-pub fn location_file(base: &Path) -> PathBuf {
-    base.join(LOCATION_FILE)
-}
-
-/// Resuelve las rutas de trabajo según la configuración guardada.
+/// Resuelve las rutas de trabajo según el entorno y la configuración guardada.
 ///
-/// Prioridad: variable de entorno, archivo de ubicación y, por último, el
-/// directorio estándar del sistema.
+/// La carpeta base sale de `RAGGY_HOME` o de `~/.raggydesktop`; el directorio de
+/// datos, del campo `data_dir` de `settings.json` o de la propia carpeta base.
 pub fn resolve() -> Result<AppPaths> {
-    if let Some(dir) = std::env::var_os(DATA_DIR_ENV) {
+    Ok(resolve_from(&home_dir()?))
+}
+
+/// Carpeta base de la aplicación.
+pub fn home_dir() -> Result<PathBuf> {
+    if let Some(dir) = std::env::var_os(HOME_ENV) {
         if !dir.is_empty() {
-            return Ok(AppPaths::with_data_dir(dir));
+            return Ok(PathBuf::from(dir));
         }
     }
 
-    let base = default_data_dir()?;
-    Ok(resolve_from(&base))
+    let base = directories::BaseDirs::new().ok_or(CoreError::DataDirUnavailable)?;
+    Ok(base.home_dir().join(HOME_DIR_NAME))
 }
 
-/// Resuelve las rutas a partir de un directorio base (sin variables de entorno).
-pub fn resolve_from(base: &Path) -> AppPaths {
-    if let Ok(raw) = std::fs::read_to_string(location_file(base)) {
-        if let Ok(location) = toml::from_str::<LocationConfig>(&raw) {
-            if let Some(dir) = location.data_dir {
-                return AppPaths::with_data_dir(dir);
-            }
-        }
-    }
-    AppPaths::with_data_dir(base)
+/// Resuelve las rutas a partir de una carpeta base explícita.
+pub fn resolve_from(home: &Path) -> AppPaths {
+    let data_dir =
+        data_dir_from_settings(&home.join(SETTINGS_FILE)).unwrap_or_else(|| home.to_path_buf());
+    AppPaths::with_data_dir(home, data_dir)
 }
 
-/// Guarda la ubicación de datos elegida por el usuario (HU-28).
-pub fn set_location(data_dir: &Path) -> Result<()> {
-    let base = default_data_dir()?;
-    let config = LocationConfig {
-        data_dir: Some(data_dir.to_path_buf()),
-    };
-    let serialized = toml::to_string_pretty(&config)?;
-    std::fs::create_dir_all(&base).map_err(|source| CoreError::Io {
-        path: base.clone(),
-        source,
-    })?;
-    let path = location_file(&base);
-    std::fs::write(&path, serialized).map_err(|source| CoreError::Io { path, source })?;
-    Ok(())
+/// Lee el campo `data_dir` de `settings.json`, si está definido.
+fn data_dir_from_settings(path: &Path) -> Option<PathBuf> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    value
+        .get("data_dir")
+        .and_then(|dir| dir.as_str())
+        .filter(|dir| !dir.trim().is_empty())
+        .map(PathBuf::from)
 }
 
 /// Migra los datos existentes a otro directorio (HU-28).
 ///
 /// La base de datos se copia con una instantánea consistente; el resto de
-/// archivos (configuración, índices, artefactos y logs) se copian tal cual.
+/// archivos (índices, artefactos y registros) se copian tal cual. El archivo
+/// `settings.json` no se copia aquí: lo gestiona la configuración.
 pub fn migrate_data(
     from: &AppPaths,
     to: &AppPaths,
@@ -149,15 +144,6 @@ pub fn migrate_data(
 
     storage.backup_to(&to.db_path())?;
     let mut copied = 1usize;
-
-    let config = from.config_path();
-    if config.is_file() {
-        std::fs::copy(&config, to.config_path()).map_err(|source| CoreError::Io {
-            path: to.config_path(),
-            source,
-        })?;
-        copied += 1;
-    }
 
     for (source, destination) in [
         (from.indexes_dir(), to.indexes_dir()),
@@ -223,53 +209,48 @@ mod tests {
 
     #[test]
     fn rutas_derivadas_cuelgan_del_directorio_de_datos() {
-        let paths = AppPaths::with_data_dir("/tmp/raggy-test");
+        let paths = AppPaths::with_home("/tmp/raggy-home");
         assert_eq!(
-            paths.config_path(),
-            PathBuf::from("/tmp/raggy-test/config.toml")
+            paths.settings_path(),
+            PathBuf::from("/tmp/raggy-home/settings.json")
         );
         assert_eq!(
             paths.db_path(),
-            PathBuf::from("/tmp/raggy-test/raggy.sqlite3")
+            PathBuf::from("/tmp/raggy-home/raggy.sqlite3")
         );
         assert_eq!(
             paths.indexes_dir(),
-            PathBuf::from("/tmp/raggy-test/indexes")
+            PathBuf::from("/tmp/raggy-home/indexes")
         );
     }
 
     #[test]
     fn ensure_dirs_crea_el_arbol() {
         let dir = temp_dir("dirs");
-        let paths = AppPaths::with_data_dir(&dir);
+        let paths = AppPaths::with_home(&dir);
         paths.ensure_dirs().expect("debería crear el árbol");
-        assert!(paths.data_dir.is_dir());
-        assert!(paths.indexes_dir().is_dir());
-        assert!(paths.artifacts_dir().is_dir());
+        assert!(paths.home_dir.is_dir());
         assert!(paths.logs_dir().is_dir());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn resolve_from_usa_el_archivo_de_ubicacion() {
-        let base = temp_dir("base");
+    fn el_directorio_de_datos_sale_de_settings_json() {
+        let home = temp_dir("home");
         let custom = temp_dir("custom");
 
-        // Sin archivo de ubicación se usa el directorio base.
-        assert_eq!(resolve_from(&base).data_dir, base);
+        // Sin settings.json, el directorio de datos es la carpeta base.
+        assert_eq!(resolve_from(&home).data_dir, home);
 
-        // Con archivo de ubicación se usa el directorio indicado.
-        let config = LocationConfig {
-            data_dir: Some(custom.clone()),
-        };
+        // Con `data_dir` en settings.json, se usa ese directorio.
         std::fs::write(
-            location_file(&base),
-            toml::to_string_pretty(&config).expect("serializa"),
+            home.join(SETTINGS_FILE),
+            format!("{{\"data_dir\": \"{}\"}}", custom.display()),
         )
-        .expect("escribe ubicación");
-        assert_eq!(resolve_from(&base).data_dir, custom);
+        .expect("escribe settings.json");
+        assert_eq!(resolve_from(&home).data_dir, custom);
 
-        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&home);
         let _ = std::fs::remove_dir_all(&custom);
     }
 }

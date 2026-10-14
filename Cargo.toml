@@ -35,10 +35,13 @@ thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "1.1"
-
 # --- logging ---
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
+# --- seguridad ---
+zeroize = "1.9"
 
 # --- persistencia ---
 rusqlite = { version = "0.40", features = ["bundled", "backup"] }
@@ -62,7 +65,6 @@ reqwest = { version = "0.13", default-features = false, features = [
     "json",
     "rustls",
 ] }
-keyring = "4.2"
 
 # --- interfaz gráfica ---
 eframe = { version = "0.36", default-features = false, features = [
