@@ -59,8 +59,9 @@ Windows.
 ### Búsqueda con recuperación híbrida
 - **Embeddings locales** deterministas, sin modelos ni conexión a internet.
 - Índice vectorial (similitud coseno) + índice léxico **BM25 normalizado por la
-  consulta**, fusionados con un **corte relativo al mejor resultado** (nunca se
-  descarta el fragmento más relevante). El recuperador se mantiene
+  consulta**, fusionados con un **corte relativo al mejor resultado de cada
+  origen** (nunca se descarta el fragmento más relevante y una fuente no eclipsa
+  a la otra). El recuperador se mantiene
   en caché por carpeta y se renueva al reindexar.
 - **Análisis de texto**: se descartan las palabras vacías y la búsqueda no
   distingue acentos (`gestion` encuentra «gestión»); el índice léxico pesa además
@@ -213,7 +214,9 @@ Todo vive en la **carpeta base** `~/.raggydesktop/`:
 
 `similarity_threshold` es un **corte relativo** (0.0–1.0): se conservan los
 fragmentos cuya puntuación alcanza al menos esa fracción de la mejor de la
-consulta. Un valor bajo aporta más contexto; uno alto es más estricto.
+consulta. El corte se aplica por separado a la carpeta del chat y a sus adjuntos,
+y se reserva una plaza al mejor de cada origen para poder compararlos. Un valor
+bajo aporta más contexto; uno alto es más estricto.
 
 Las claves se pueden introducir desde la interfaz (se guardan en `api_keys`) o
 dejarse fuera y usar las variables de entorno `OPENAI_API_KEY`,

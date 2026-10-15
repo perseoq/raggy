@@ -12,10 +12,10 @@ use crate::vector::VectorIndex;
 /// Valores estándar de recuperación para consultas nuevas.
 pub const DEFAULT_TOP_K: usize = 5;
 
-/// Fracción del mejor resultado que debe alcanzar una coincidencia para entrar
-/// en el contexto (0.0 = todo, 1.0 = solo el mejor). Un corte relativo evita
-/// descartar la respuesta correcta cuando la escala absoluta de la consulta es
-/// baja, algo habitual con los embeddings locales.
+/// Fracción del mejor resultado **de cada origen** que debe alcanzar una
+/// coincidencia para entrar en el contexto (0.0 = todo, 1.0 = solo el mejor). Un
+/// corte relativo evita descartar la respuesta correcta cuando la escala absoluta
+/// de la consulta es baja, algo habitual con los embeddings locales.
 pub const DEFAULT_RELATIVE_FLOOR: f32 = 0.3;
 
 /// Puntuación absoluta mínima para considerar que existe alguna señal. Solo
@@ -168,8 +168,12 @@ impl RetrievedChunk {
 pub struct RetrieverOptions {
     /// Número máximo de fragmentos a devolver.
     pub top_k: usize,
-    /// Corte **relativo** al mejor resultado: se conservan las coincidencias cuya
-    /// puntuación combinada sea al menos esta fracción de la mejor (0.0..=1.0).
+    /// Corte **relativo** al mejor resultado de cada origen: se conservan las
+    /// coincidencias cuya puntuación combinada sea al menos esta fracción de la
+    /// mejor de su origen (0.0..=1.0).
+    ///
+    /// Se aplica por separado a la carpeta del chat y a sus adjuntos, de modo que
+    /// una fuente muy relevante no eclipsa a la otra.
     pub relative_floor: f32,
 }
 
@@ -339,7 +343,7 @@ impl Retriever for HybridRetriever {
             fused.entry(id).or_insert((0.0, 0.0)).1 = score.clamp(0.0, 1.0);
         }
 
-        let mut results: Vec<RetrievedChunk> = fused
+        let results: Vec<RetrievedChunk> = fused
             .into_iter()
             .filter_map(|(id, (vector_score, lexical_score))| {
                 let chunk = self.chunks.get(&id)?.clone();
@@ -361,21 +365,66 @@ impl Retriever for HybridRetriever {
             .filter(|result| result.score >= MIN_ABSOLUTE_SCORE)
             .collect();
 
-        // El corte es relativo al mejor resultado: si hay alguna coincidencia,
-        // nunca se descarta la mejor por un umbral absoluto mal calibrado.
-        if let Some(best) = results.iter().map(|result| result.score).reduce(f32::max) {
-            let floor = (best * options.relative_floor.clamp(0.0, 1.0)).max(MIN_ABSOLUTE_SCORE);
-            results.retain(|result| result.score >= floor);
+        // El corte es relativo al mejor resultado **de cada origen**: si hay
+        // alguna coincidencia, nunca se descarta la mejor por un umbral absoluto
+        // mal calibrado, y un adjunto muy relevante no deja fuera el mejor
+        // fragmento de la carpeta indexada (ni al revés).
+        let mut groups: [Vec<RetrievedChunk>; 2] = [Vec::new(), Vec::new()];
+        for result in results {
+            let index = usize::from(result.origin.is_attachment());
+            groups[index].push(result);
+        }
+        for group in &mut groups {
+            if let Some(best) = group.iter().map(|result| result.score).reduce(f32::max) {
+                let floor = (best * options.relative_floor.clamp(0.0, 1.0)).max(MIN_ABSOLUTE_SCORE);
+                group.retain(|result| result.score >= floor);
+            }
+            group.sort_by(by_score);
         }
 
-        results.sort_by(|a, b| {
-            b.score
-                .total_cmp(&a.score)
-                .then_with(|| a.chunk.id.cmp(&b.chunk.id))
+        // Se reserva una plaza para el mejor resultado de cada origen (primero
+        // el mejor global) para que carpeta y adjuntos puedan compararse, y el
+        // resto de plazas se rellenan por puntuación.
+        let mut order = [0usize, 1usize];
+        order.sort_by(|left, right| {
+            group_best(&groups[*right]).total_cmp(&group_best(&groups[*left]))
         });
-        results.truncate(options.top_k);
-        results
+        let mut selected: Vec<RetrievedChunk> = Vec::new();
+        for index in order {
+            if selected.len() >= options.top_k {
+                break;
+            }
+            if let Some(best) = groups[index].first() {
+                selected.push(best.clone());
+            }
+        }
+
+        let mut rest: Vec<RetrievedChunk> = groups.into_iter().flatten().collect();
+        rest.retain(|result| {
+            !selected
+                .iter()
+                .any(|chosen| chosen.chunk.id == result.chunk.id)
+        });
+        rest.sort_by(by_score);
+        selected.extend(
+            rest.into_iter()
+                .take(options.top_k.saturating_sub(selected.len())),
+        );
+        selected.sort_by(by_score);
+        selected
     }
+}
+
+/// Orden por puntuación descendente, con el identificador como desempate estable.
+fn by_score(a: &RetrievedChunk, b: &RetrievedChunk) -> std::cmp::Ordering {
+    b.score
+        .total_cmp(&a.score)
+        .then_with(|| a.chunk.id.cmp(&b.chunk.id))
+}
+
+/// Mejor puntuación de un grupo ya ordenado (o el mínimo si está vacío).
+fn group_best(group: &[RetrievedChunk]) -> f32 {
+    group.first().map(|result| result.score).unwrap_or(f32::MIN)
 }
 
 #[cfg(test)]
@@ -632,5 +681,116 @@ mod tests {
         assert!(results
             .iter()
             .all(|result| result.origin == ChunkOrigin::Folder));
+    }
+
+    #[test]
+    fn el_corte_relativo_se_aplica_por_origen() {
+        let mut retriever = HybridRetriever::new(Box::new(HashingEmbedding::default()));
+        retriever.add_with_origin(
+            chunk(
+                "carpeta",
+                "la referencia C-2025-01819 aparece en compras.csv",
+            ),
+            None,
+            ChunkOrigin::Folder,
+        );
+        let mut factura = chunk(
+            "adjunto",
+            "factura de compras con la referencia de la factura y su importe total",
+        );
+        factura.metadata.source_file = "factura.pdf".to_string();
+        retriever.add_with_origin(
+            factura,
+            None,
+            ChunkOrigin::Attachment("factura.pdf".to_string()),
+        );
+
+        // Con el corte más estricto, cada origen conserva su mejor coincidencia:
+        // antes, el adjunto más relevante dejaba fuera la carpeta.
+        let results = retriever.retrieve(
+            "referencia de la factura de compras",
+            &RetrieverOptions {
+                top_k: 5,
+                relative_floor: 1.0,
+            },
+        );
+
+        assert_eq!(
+            results.len(),
+            2,
+            "ambos orígenes deben aportar: {results:?}"
+        );
+        assert!(results
+            .iter()
+            .any(|result| result.origin == ChunkOrigin::Folder));
+        assert!(results.iter().any(|result| result.origin.is_attachment()));
+    }
+
+    #[test]
+    fn reserva_una_plaza_para_la_carpeta_cuando_los_adjuntos_dominan() {
+        let mut retriever = HybridRetriever::new(Box::new(HashingEmbedding::default()));
+        retriever.add_with_origin(
+            chunk(
+                "carpeta",
+                "la referencia C-2025-01819 aparece en compras.csv",
+            ),
+            None,
+            ChunkOrigin::Folder,
+        );
+        for index in 0..4 {
+            let mut documento = chunk(
+                &format!("adjunto-{index}"),
+                "factura de compras con la referencia de la factura y su importe total",
+            );
+            documento.metadata.source_file = format!("factura-{index}.pdf");
+            retriever.add_with_origin(
+                documento,
+                None,
+                ChunkOrigin::Attachment(format!("factura-{index}.pdf")),
+            );
+        }
+
+        // Con dos plazas y cuatro adjuntos parecidos, una se reserva para la
+        // carpeta para que ambos orígenes puedan compararse.
+        let results = retriever.retrieve(
+            "referencia de la factura de compras",
+            &RetrieverOptions {
+                top_k: 2,
+                relative_floor: 0.0,
+            },
+        );
+
+        assert_eq!(results.len(), 2);
+        assert!(
+            results
+                .iter()
+                .any(|result| result.origin == ChunkOrigin::Folder),
+            "la carpeta debe quedar representada: {results:?}"
+        );
+        assert!(results.iter().any(|result| result.origin.is_attachment()));
+    }
+
+    #[test]
+    fn con_una_sola_plaza_gana_el_resultado_mas_relevante() {
+        let mut retriever = HybridRetriever::new(Box::new(HashingEmbedding::default()));
+        retriever.add_with_origin(
+            chunk("carpeta", "contenido poco relacionado"),
+            None,
+            ChunkOrigin::Folder,
+        );
+        retriever.add_with_origin(
+            chunk("adjunto", "la factura de compras y su importe total"),
+            None,
+            ChunkOrigin::Attachment("factura.pdf".to_string()),
+        );
+
+        let results = retriever.retrieve(
+            "factura de compras importe",
+            &RetrieverOptions {
+                top_k: 1,
+                relative_floor: 0.0,
+            },
+        );
+        assert_eq!(results.len(), 1);
     }
 }

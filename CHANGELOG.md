@@ -10,6 +10,21 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.2.6] - 2026-10-15
+
+### Corregido
+
+- **Comparación entre la carpeta y los adjuntos**: el corte relativo se aplica
+  ahora **por origen**. Antes, un adjunto muy relevante podía dejar fuera el mejor
+  fragmento de la carpeta indexada, y la respuesta acababa citando solo el archivo
+  subido. Además se reserva una plaza para el mejor resultado de cada origen (el
+  mejor global primero), de modo que ambos puedan compararse aunque uno domine.
+- El prompt de sistema distingue los adjuntos («Archivo adjunto a este chat: …»)
+  de la documentación indexada: las preguntas sobre dónde está o dónde se registra
+  algo se responden con las fuentes de la carpeta, y cada afirmación cita la
+  etiqueta del fragmento del que procede de verdad (sin atribuir a un archivo
+  datos que aparecen en otro).
+
 ## [2.2.5] - 2026-10-15
 
 ### Añadido

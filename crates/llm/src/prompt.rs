@@ -24,7 +24,13 @@ propias palabras qué queda fuera; no uses la frase de la regla 4.\n\
 5. Nunca combines esa frase con una respuesta: o respondes con el contexto, o \
 dices que no lo encuentras.\n\
 6. Responde en el mismo idioma que la pregunta, de forma concisa y directa, sin \
-repetir la pregunta ni copiar el contexto sin procesarlo.";
+repetir la pregunta ni copiar el contexto sin procesarlo.\n\
+7. Los fragmentos precedidos por «(Archivo adjunto a este chat: …)» son archivos \
+que el usuario acaba de adjuntar a esta conversación, no documentación indexada. \
+Úsalos como material adicional; si la pregunta trata de dónde está, dónde se \
+registra o dónde se guarda algo en la documentación indexada, respóndela con las \
+fuentes de la carpeta. Cita cada afirmación con la etiqueta del fragmento del que \
+procede de verdad; nunca atribuyas a un archivo datos que aparecen en otro.";
 
 /// Longitud máxima del contenido de un artefacto incluido en el prompt.
 const MAX_ARTIFACT_CHARS: usize = 4000;
@@ -175,5 +181,11 @@ mod tests {
         assert!(prompt.contains("- file_uno.py (python)"));
         assert!(prompt.contains("Contenido actual de file_dos.py"));
         assert!(prompt.contains("print('hola')"));
+    }
+
+    #[test]
+    fn la_instruccion_distingue_carpeta_de_adjuntos() {
+        assert!(STRICT_SYSTEM_PROMPT.contains("Archivo adjunto a este chat"));
+        assert!(STRICT_SYSTEM_PROMPT.contains("documentación indexada"));
     }
 }
