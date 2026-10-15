@@ -17,17 +17,20 @@ use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 
 use crate::{
-    validate_zip_size, DocKind, ExtractError, ExtractedDocument, Location, Result, Section,
+    limits, validate_zip_size, DocKind, ExtractError, ExtractedDocument, Location, Result, Section,
 };
 
 /// Extrae el texto de un `.docx` a partir de sus bytes.
 pub fn extract(bytes: &[u8]) -> Result<ExtractedDocument> {
-    extract_with_limits(bytes, 512 * 1024 * 1024)
+    extract_with_limits(
+        bytes,
+        limits::DEFAULT_MAX_ARCHIVE_MIB * limits::BYTES_PER_MIB,
+    )
 }
 
 /// Extrae un `.docx`, limitando la expansión total del paquete.
 pub fn extract_with_limits(bytes: &[u8], max_archive_bytes: u64) -> Result<ExtractedDocument> {
-    validate_zip_size(bytes, max_archive_bytes)?;
+    validate_zip_size(bytes, max_archive_bytes, limits::MAX_ARCHIVE_ENTRIES)?;
     let xml = read_document_xml(bytes, max_archive_bytes)?;
     let (paragraphs, has_page_breaks) = parse_paragraphs(&xml)?;
     Ok(if has_page_breaks {

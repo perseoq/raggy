@@ -10,10 +10,6 @@ use lopdf::Document;
 use crate::ocr::Ocr;
 use crate::{DocKind, ExtractError, ExtractOptions, ExtractedDocument, Location, Result, Section};
 
-/// Tope de bytes descomprimidos por página y por documento PDF.
-const MAX_PAGE_BYTES: usize = 8 * 1024 * 1024;
-const MAX_DOCUMENT_TEXT_BYTES: usize = 64 * 1024 * 1024;
-
 /// Extrae el texto de un PDF, una sección por página.
 pub fn extract(path: &Path, bytes: &[u8], options: &ExtractOptions) -> Result<ExtractedDocument> {
     let document = Document::load_mem(bytes).map_err(parse_error)?;
@@ -32,17 +28,22 @@ pub fn extract(path: &Path, bytes: &[u8], options: &ExtractOptions) -> Result<Ex
         ));
     }
 
+    let max_page_text_bytes =
+        usize::try_from(options.max_pdf_page_text_bytes).unwrap_or(usize::MAX);
+    let max_document_text_bytes = usize::try_from(options.max_pdf_text_bytes).unwrap_or(usize::MAX);
     let mut total_text_bytes = 0usize;
     for (number, _id) in pages.into_iter().take(options.max_pages) {
-        let remaining = MAX_DOCUMENT_TEXT_BYTES.saturating_sub(total_text_bytes);
+        let remaining = max_document_text_bytes.saturating_sub(total_text_bytes);
         if remaining == 0 {
             push_unique(
                 &mut warnings,
-                format!("`{file_name}` excede el límite de texto PDF de {MAX_DOCUMENT_TEXT_BYTES} bytes."),
+                format!(
+                    "`{file_name}` excede el límite de texto PDF de {max_document_text_bytes} bytes."
+                ),
             );
             break;
         }
-        let page_limit = remaining.min(MAX_PAGE_BYTES);
+        let page_limit = remaining.min(max_page_text_bytes);
         let mut text = normalize(&page_text(&document, number, page_limit));
 
         if text.chars().count() < options.min_text_chars && options.ocr_enabled {
@@ -77,11 +78,22 @@ pub fn extract(path: &Path, bytes: &[u8], options: &ExtractOptions) -> Result<Ex
         }
 
         if !text.is_empty() {
+            if text.len() > page_limit {
+                text.truncate(last_char_boundary(&text, page_limit));
+                push_unique(
+                    &mut warnings,
+                    format!(
+                        "OCR de una página de `{file_name}` alcanzó el límite de {page_limit} bytes."
+                    ),
+                );
+            }
             if text.len() > remaining {
                 text.truncate(last_char_boundary(&text, remaining));
                 push_unique(
                     &mut warnings,
-                    format!("`{file_name}` alcanzó el límite de texto PDF de {MAX_DOCUMENT_TEXT_BYTES} bytes."),
+                    format!(
+                        "`{file_name}` alcanzó el límite de texto PDF de {max_document_text_bytes} bytes."
+                    ),
                 );
             }
             total_text_bytes = total_text_bytes.saturating_add(text.len());
@@ -163,6 +175,59 @@ fn parse_error(error: lopdf::Error) -> ExtractError {
 mod tests {
     use super::*;
 
+    fn text_pdf(text: &str) -> Vec<u8> {
+        use lopdf::{
+            content::{Content, Operation},
+            dictionary, Object, Stream,
+        };
+
+        let mut document = Document::with_version("1.5");
+        let pages_id = document.new_object_id();
+        let font_id = document.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+        });
+        let resources = dictionary! {
+            "Font" => dictionary! { "F1" => font_id },
+        };
+        let content = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec!["F1".into(), 12.into()]),
+                Operation::new("Td", vec![100.into(), 700.into()]),
+                Operation::new("Tj", vec![Object::string_literal(text)]),
+                Operation::new("ET", vec![]),
+            ],
+        }
+        .encode()
+        .expect("codifica contenido PDF");
+        let content_id = document.add_object(Stream::new(dictionary! {}, content));
+        let page_id = document.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+            "Resources" => resources,
+            "Contents" => content_id,
+        });
+        document.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![Object::Reference(page_id)],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = document.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        document.trailer.set("Root", catalog_id);
+        let mut bytes = Vec::new();
+        document.save_to(&mut bytes).expect("serializa PDF");
+        bytes
+    }
+
     fn blank_pdf(page_count: u32) -> Vec<u8> {
         use lopdf::{dictionary, Document, Object};
 
@@ -205,6 +270,32 @@ mod tests {
     fn un_pdf_invalido_da_error() {
         let options = ExtractOptions::default();
         assert!(extract(Path::new("/tmp/raggy-pdf.pdf"), b"invalid", &options).is_err());
+    }
+
+    #[test]
+    fn extrae_texto_real_y_cita_la_pagina() {
+        let options = ExtractOptions::default();
+        let bytes = text_pdf("Raggy PDF verificable");
+        let extracted = extract(Path::new("guia.pdf"), &bytes, &options).expect("extrae PDF");
+        assert_eq!(extracted.sections.len(), 1);
+        assert!(extracted.sections[0].text.contains("Raggy PDF verificable"));
+        assert_eq!(extracted.sections[0].location, Location::Page(1));
+    }
+
+    #[test]
+    fn aplica_los_limites_de_texto_pdf_configurados() {
+        let options = ExtractOptions {
+            ocr_enabled: false,
+            max_pdf_page_text_bytes: 8,
+            max_pdf_text_bytes: 8,
+            ..ExtractOptions::default()
+        };
+        let bytes = text_pdf("Este texto es más largo que el límite configurado.");
+        let extracted = extract(Path::new("limite.pdf"), &bytes, &options).expect("extrae PDF");
+        assert!(extracted
+            .sections
+            .iter()
+            .all(|section| section.text.len() <= 8));
     }
 
     #[test]

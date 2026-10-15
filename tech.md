@@ -23,83 +23,51 @@ A continuación, las tecnologías necesarias para construir este software, todas
 
 ## 2. Cliente Multi-Proveedor de LLM
 
-**Recomendado: `async-openai` + adaptadores propios**
-- `async-openai` cubre OpenAI y sirve como base para proveedores compatibles (DeepSeek, OpenRouter).
-- Para Anthropic se puede usar `anthropic` crate o un cliente HTTP propio con `reqwest`.
-- Capa de abstracción propia: un trait común `LlmProvider` con implementaciones por proveedor, normalizando:
-  - Mensajes (system, user, assistant).
-  - Streaming token a token.
-  - Parámetros (temperatura, max tokens).
-  - Manejo de errores y rate limits.
-
-**Alternativa unificada: `rig`**
-- Framework Rust para aplicaciones con LLM, con soporte de múltiples proveedores y RAG integrado.
-- Útil si se quiere acelerar la integración de embeddings, retrievers y agentes.
-
-**Recomendación:** capa propia de abstracción sobre `reqwest` + `async-openai` para máximo control, o `rig` si se quiere ir más rápido.
+**Implementación actual: `reqwest` + adaptadores propios**
+- Cada proveedor implementa el trait `LlmProvider`; OpenAI, Anthropic, DeepSeek y
+  OpenRouter comparten el contrato de mensajes, streaming, parámetros y errores.
+- `reqwest` gestiona HTTP y `tokio` ejecuta las peticiones fuera de la interfaz.
+- Los modelos se seleccionan por sesión; no se cambia de proveedor sin permiso.
 
 ---
 
 ## 3. RAG y Búsqueda Vectorial
 
-**Embeddings (generación):**
-- **Local:** `candle` o `ort` (ONNX Runtime) cargando modelos como `bge-small`, `jina-embeddings` o `nomic-embed`.
-- **Remoto:** llamadas a la API de embeddings de OpenAI o proveedor elegido.
-
-**Base de datos vectorial (embebida):**
-| Opción | Características | Uso |
-|---|---|---|
-| **qdrant-client (modo local)** | HNSW, filtros por metadata, persistencia | Robusto y escalable |
-| **lance / lancedb** | Formato columnar, búsqueda vectorial + full-text | Bueno para proyectos locales |
-| **vecdb** | Embebido, HNSW + BM25 híbrido, WAL | Ligero, estilo SQLite |
-
-**Recomendación:** `lancedb` o `qdrant` en modo local para el índice vectorial; combinarlo con BM25 (por ejemplo vía `tantivy`) para búsqueda híbrida.
-
-**Chunking de Markdown:**
-- `pulldown-cmark` para parsear `.md`.
-- Estrategia propia de chunking respetando encabezados, listas y bloques de código.
+**Implementación actual:**
+- `HashingEmbedding` genera embeddings locales deterministas; no descarga modelos
+  ni envía documentos a un servicio de embeddings.
+- SQLite (`rusqlite`) persiste chunks y vectores. El índice vectorial coseno y
+  BM25 se construyen en memoria y se conservan en caché por carpeta; se renuevan
+  cuando cambia la revisión del índice.
+- El recuperador fusiona BM25 normalizado y similitud vectorial. Los parámetros
+  de BM25, el peso vectorial y la amplitud del pool se pueden ajustar mediante
+  `HybridRetrieverOptions`.
+- Markdown y código usan un chunker estructural; CSV, Excel, Office y PDF pasan
+  por `raggy-docs` antes de crear fragmentos con su ubicación de origen.
 
 ---
 
 ## 4. Persistencia Local (Sesiones / Memoria / Proyectos)
 
-**Recomendado: SQLite vía `rusqlite` o `sqlx`**
+**Implementación actual: SQLite vía `rusqlite`**
 - Almacena:
-  - Carpetas indexadas y su hash.
+  - Carpetas indexadas, revisiones y hashes de procesamiento.
   - Sesiones por carpeta.
   - Mensajes e historial.
   - Artefactos generados (nombre, ruta, fecha, sesión).
   - Memoria del proyecto.
-- `sqlx` con SQLite permite migraciones y consultas asíncronas.
-
-**Alternativa: `sled` o `redb`**
-- KV embebido en Rust puro, útil si se prefiere evitar SQL.
-
-**Recomendación:** SQLite por claridad relacional y facilidad de consultas.
+- Las migraciones versionadas gestionan cambios de esquema; las consultas se
+  ejecutan con una conexión SQLite por hilo de trabajo.
 
 ---
 
-## 5. Almacenamiento Seguro de API Keys
+## 5. Almacenamiento de claves de API
 
-**Recomendado: `keyring`**
-- Usa el almacén de credenciales nativo del sistema:
-  - Windows Credential Manager.
-  - macOS Keychain.
-  - Linux Secret Service (GNOME Keyring / KWallet).
-- Ideal para guardar API Keys sin reinventar cifrado.
-
-**Alternativa: `secrecy` + `aes-gcm`**
-- Cifrado propio con `aes-gcm` y claves protegidas por el usuario.
-- `secrecy` evita fugas accidentales en logs (tipos `SecretString`).
-
-**Recomendación:** `keyring` como base, con `secrecy` para manejar secretos en memoria.
-
-> **Decisión de implementación (v0.1.0):** las claves se guardan en
-> `~/.raggydesktop/settings.json` junto al resto de la configuración, con
-> permisos restringidos al propietario (`0600` en Unix). Se mantiene un tipo
-> `Secret` interno que redacta el valor en `Debug`/`Display` y lo borra de
-> memoria al liberarlo, y las variables de entorno siguen sirviendo como
-> alternativa. El llavero del sistema queda como mejora futura.
+**Implementación actual:** las claves se guardan sin cifrar en
+`~/.raggydesktop/settings.json`, con permisos `0600` en Unix. `Secret` redacta el
+valor en `Debug`/`Display` y zeroiza las copias bajo su control; las variables de
+entorno también pueden aportar claves. El llavero nativo queda como posible
+mejora futura; la aplicación no afirma usar cifrado ni un llavero del sistema.
 
 ---
 
@@ -113,7 +81,7 @@ A continuación, las tecnologías necesarias para construir este software, todas
 | Parseo Markdown | `pulldown-cmark` |
 | Watcher de archivos (reindexado incremental) | `notify` |
 | Diálogos nativos de carpeta/archivo | `rfd` |
-| Directorios del sistema | `dirs` |
+| Directorios del sistema | `directories` |
 | Logging | `tracing` + `tracing-subscriber` |
 | Manejo de errores | `anyhow` + `thiserror` |
 | Regex para detectar bloques de código con nombre | `regex` |
@@ -144,13 +112,13 @@ Separar el proyecto en workspaces de Cargo:
 | Capa | Tecnología |
 |---|---|
 | GUI | egui (eframe) |
-| LLM multi-proveedor | reqwest + async-openai + capa propia |
-| RAG | lancedb o qdrant local + tantivy (BM25) |
-| Embeddings | candle u ort (local) o API remota |
-| Persistencia | SQLite (sqlx o rusqlite) |
-| Secretos | keyring + secrecy |
+| LLM multi-proveedor | `reqwest` + trait `LlmProvider` y adaptadores propios |
+| RAG | Índice vectorial en memoria + BM25 sobre chunks de SQLite |
+| Embeddings | `HashingEmbedding` local y determinista |
+| Persistencia | SQLite (`rusqlite`) |
+| Secretos | `settings.json` en texto claro, permisos restringidos y `Secret` |
 | Async | tokio |
-| Markdown | pulldown-cmark |
+| Markdown | `pulldown-cmark` |
 | Watcher | notify |
 | Diálogos | rfd |
 

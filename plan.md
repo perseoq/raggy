@@ -2,13 +2,13 @@
 
 ## 1. Visión General
 
-Software de escritorio con interfaz gráfica moderna, escrito en Rust, que funciona como un asistente de IA contextualizado sobre documentación local en Markdown. Permite indexar carpetas completas, crear sesiones persistentes por carpeta y chatear con modelos de múltiples proveedores, generando y exportando código trazable basado exclusivamente en el conocimiento indexado.
+Software de escritorio con interfaz gráfica moderna, escrito en Rust, que funciona como un asistente de IA contextualizado sobre documentos locales compatibles. Permite indexar carpetas completas, crear sesiones persistentes por carpeta y chatear con modelos de múltiples proveedores, generando y exportando código trazable basado exclusivamente en el conocimiento indexado.
 
 ---
 
 ## 2. Objetivos
 
-- **Objetivo principal:** Ofrecer un asistente local que responda con precisión quirúrgica (temperatura 0.1) basándose únicamente en archivos `.md` de una carpeta indexada.
+- **Objetivo principal:** Ofrecer un asistente local que responda con precisión (temperatura 0.1) basándose únicamente en documentos indexados y cite su ubicación verificable.
 - **Objetivos secundarios:**
   - Multi-proveedor de LLM (OpenAI, Anthropic, DeepSeek, OpenRouter).
   - Persistencia de sesiones, memoria y artefactos generados.
@@ -28,7 +28,7 @@ Software de escritorio con interfaz gráfica moderna, escrito en Rust, que funci
 - Descarga de código generado con nombre de archivo declarado.
 - Soporte multi-proveedor con configuración de API Keys.
 
-### Excluido (v1)
+### Fuera del alcance actual
 - Indexación de imágenes sueltas, audio o vídeo.
 - Colaboración multiusuario o sincronización en nube.
 - Fine-tuning de modelos.
@@ -45,7 +45,8 @@ Software de escritorio con interfaz gráfica moderna, escrito en Rust, que funci
 3. **Capa RAG:** chunker de Markdown, generador de embeddings, almacén vectorial local, recuperador con re-ranking.
 4. **Capa de Persistencia:** base de datos local (sesiones, mensajes, memoria), almacén vectorial, sistema de archivos para artefactos.
 5. **Capa de Proveedores LLM:** adaptadores normalizados por proveedor.
-6. **Capa de Seguridad:** cifrado de API Keys, aislamiento por sesión.
+6. **Capa de Seguridad:** permisos restrictivos para `settings.json`, secretos
+   redactados y aislamiento de contexto por sesión.
 
 ---
 
@@ -102,7 +103,8 @@ Software de escritorio con interfaz gráfica moderna, escrito en Rust, que funci
   - DeepSeek.
   - OpenRouter (acceso a modelos agregados).
 - Selección de modelo activo por sesión.
-- Guardado seguro de claves (cifrado local).
+- Claves en `settings.json` sin cifrar, con permisos `0600` en Unix; variables
+  de entorno como alternativa.
 - Manejo de errores, rate limits y fallback opcional.
 
 ### 5.8 Configuración y Preferencias
@@ -118,7 +120,7 @@ Software de escritorio con interfaz gráfica moderna, escrito en Rust, que funci
 
 **Flujo A — Indexar y chatear:**
 1. Usuario abre la app.
-2. Selecciona “Añadir carpeta” y elige una carpeta con `.md`.
+2. Selecciona “Añadir carpeta” y elige una carpeta con documentos compatibles.
 3. La app escanea, chunkea, genera embeddings y confirma indexación.
 4. Usuario crea una nueva sesión dentro de esa carpeta.
 5. Escribe una consulta.
@@ -144,7 +146,8 @@ Software de escritorio con interfaz gráfica moderna, escrito en Rust, que funci
 - **Rendimiento:** indexación de 1.000 archivos `.md` en tiempos razonables; chat con latencia dominada por el proveedor.
 - **Precisión:** respuestas estrictamente ancladas al RAG; sin invención de APIs ni archivos.
 - **Portabilidad:** binario único o instalador por plataforma.
-- **Seguridad:** claves cifradas en reposo; sin envío de datos fuera de los proveedores elegidos.
+- **Seguridad:** las claves se almacenan sin cifrar en `settings.json` con permisos
+  `0600` en Unix; no se envían datos fuera de los proveedores elegidos.
 - **Usabilidad:** GUI moderna, atajos de teclado, búsqueda dentro de sesiones.
 - **Escalabilidad:** soportar múltiples carpetas y sesiones concurrentes sin degradación.
 
@@ -175,11 +178,11 @@ Software de escritorio con interfaz gráfica moderna, escrito en Rust, que funci
 
 ---
 
-## 10. Evolución Futura (post-v1)
+## 10. Evolución Futura
 
-- Soporte para PDF, DOCX y HTML.
+- Soporte para HTML, imágenes sueltas, audio y vídeo.
 - Plugins de herramientas (ejecutar tests, lint).
 - Modo agente con planificación multi-paso.
 - Sincronización opcional cifrada entre dispositivos.
-- Exportación de proyecto completo como zip estructurado.
+- Sincronización y exportación estructurada de proyectos completos.
 - Integración con repositorios Git locales.

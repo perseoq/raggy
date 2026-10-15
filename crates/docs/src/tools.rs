@@ -64,8 +64,7 @@ impl Tools {
     /// Detecta herramientas; la consulta a `tesseract --list-langs` queda
     /// limitada para que el diagnóstico no pueda bloquear indefinidamente.
     pub fn detect_with_timeout(timeout_secs: u64) -> Self {
-        const MAX_PROBE_TIMEOUT_SECS: u64 = 15;
-        let probe_timeout = timeout_secs.clamp(1, MAX_PROBE_TIMEOUT_SECS);
+        let probe_timeout = timeout_secs.clamp(1, crate::limits::MAX_TOOL_PROBE_TIMEOUT_SECS);
         let tesseract = find_program(ExternalTool::Tesseract);
         let language_result = tesseract
             .as_deref()

@@ -27,8 +27,9 @@ pub use chat::{
     compose_request, context_from_retrieved, ChatCommand, ChatEvent, ChatWorker, ProviderFactory,
 };
 pub use config::{
-    AppConfig, IngestConfig, ModelConfig, RagConfig, Theme, DEFAULT_TEMPERATURE,
-    PRIVACY_NOTICE_VERSION,
+    AppConfig, IngestConfig, ModelConfig, RagConfig, Theme, DEFAULT_TEMPERATURE, MAX_CHUNK_OVERLAP,
+    MAX_CHUNK_SIZE, MAX_EMBEDDING_DIMENSIONS, MAX_SIMILARITY_THRESHOLD, MAX_TOP_K, MIN_CHUNK_SIZE,
+    MIN_EMBEDDING_DIMENSIONS, MIN_SIMILARITY_THRESHOLD, PRIVACY_NOTICE_VERSION,
 };
 pub use error::{CoreError, Result};
 pub use export::{session_markdown, write_session_export};
@@ -40,8 +41,11 @@ pub use ingest::tools_report;
 pub use paths::{
     home_dir, migrate_data, resolve, resolve_from, AppPaths, HOME_DIR_NAME, HOME_ENV, SETTINGS_FILE,
 };
+pub use raggy_docs::limits as ingest_limits;
 pub use raggy_docs::ExtractOptions;
-pub use search::{build_retriever, embedding_coverage, search_folder, EmbeddingCoverage};
+pub use search::{
+    build_retriever, embedding_coverage, search_folder, EmbeddingCoverage, SearchCache,
+};
 pub use secrets::{
     mask, resolve_key, MemoryStore, Secret, SecretError, SecretStore, SettingsStore,
 };

@@ -6,8 +6,8 @@ pub const NOT_FOUND_MESSAGE: &str = "No encuentro esa información en los archiv
 
 /// Instrucción de sistema que ancla al modelo al contexto recuperado.
 pub const STRICT_SYSTEM_PROMPT: &str = "\
-Eres un asistente técnico que responde con la documentación Markdown que el \
-usuario ha indexado, entregada más abajo como «contexto recuperado».\n\
+Eres un asistente técnico que responde con los documentos compatibles que el \
+usuario ha indexado, entregados más abajo como «contexto recuperado».\n\
 Reglas obligatorias:\n\
 1. Responde únicamente con información del contexto. No inventes nombres de \
 archivos, funciones, rutas, APIs ni comportamientos.\n\

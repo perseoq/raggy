@@ -1,4 +1,4 @@
-//! Configuración persistente de la aplicación (`config.toml`).
+//! Configuración persistente de la aplicación (`settings.json`) y límites de ingesta.
 //!
 //! Los valores están alineados con las HU de configuración: tema (HU-26),
 //! parámetros del RAG (HU-27), temperatura bloqueada por defecto (HU-13) y
@@ -15,6 +15,23 @@ use crate::error::{CoreError, Result};
 
 /// Temperatura por defecto, fijada en 0.1 para minimizar alucinaciones (HU-13).
 pub const DEFAULT_TEMPERATURE: f32 = 0.1;
+
+/// Límites de los controles de recuperación mostrados en Configuración.
+pub const MIN_CHUNK_SIZE: usize = 100;
+pub const MAX_CHUNK_SIZE: usize = 4_000;
+pub const MAX_CHUNK_OVERLAP: usize = 2_000;
+pub const MAX_TOP_K: usize = 50;
+pub const MIN_SIMILARITY_THRESHOLD: f32 = 0.0;
+pub const MAX_SIMILARITY_THRESHOLD: f32 = 1.0;
+pub const MIN_EMBEDDING_DIMENSIONS: usize = raggy_rag::MIN_EMBEDDING_DIMENSIONS;
+pub const MAX_EMBEDDING_DIMENSIONS: usize = 8_192;
+
+const CHUNK_SIZE_WARNING_MIN: usize = 200;
+const CHUNK_SIZE_WARNING_MAX: usize = 3_000;
+const TOP_K_WARNING_MAX: usize = 20;
+const SIMILARITY_WARNING_MIN: f32 = 0.1;
+const SIMILARITY_WARNING_MAX: f32 = 0.8;
+const EMBEDDING_WARNING_MIN: usize = 64;
 
 /// Versión del aviso de privacidad que debe aceptar el usuario.
 pub const PRIVACY_NOTICE_VERSION: u32 = 2;
@@ -51,11 +68,11 @@ pub struct RagConfig {
 impl Default for RagConfig {
     fn default() -> Self {
         Self {
-            chunk_size: 800,
-            chunk_overlap: 100,
-            top_k: 5,
-            similarity_threshold: 0.3,
-            embedding_dimensions: 512,
+            chunk_size: raggy_rag::DEFAULT_CHUNK_SIZE,
+            chunk_overlap: raggy_rag::DEFAULT_CHUNK_OVERLAP,
+            top_k: raggy_rag::DEFAULT_TOP_K,
+            similarity_threshold: raggy_rag::DEFAULT_MIN_SCORE,
+            embedding_dimensions: raggy_rag::DEFAULT_EMBEDDING_DIMENSIONS,
         }
     }
 }
@@ -65,27 +82,27 @@ impl RagConfig {
     pub fn warnings(&self) -> Vec<String> {
         let mut warnings = Vec::new();
 
-        if self.chunk_size < 200 {
+        if self.chunk_size < CHUNK_SIZE_WARNING_MIN {
             warnings.push(
                 "El tamaño de fragmento es muy pequeño y puede dividir en exceso.".to_string(),
             );
         }
-        if self.chunk_size > 3000 {
+        if self.chunk_size > CHUNK_SIZE_WARNING_MAX {
             warnings.push(
                 "El tamaño de fragmento es muy grande y puede diluir la relevancia.".to_string(),
             );
         }
-        if self.top_k > 20 {
+        if self.top_k > TOP_K_WARNING_MAX {
             warnings
                 .push("Recuperar más de 20 fragmentos suele degradar la precisión.".to_string());
         }
-        if self.similarity_threshold < 0.1 {
+        if self.similarity_threshold < SIMILARITY_WARNING_MIN {
             warnings.push("Un umbral muy bajo dejará pasar contexto poco relevante.".to_string());
         }
-        if self.similarity_threshold > 0.8 {
+        if self.similarity_threshold > SIMILARITY_WARNING_MAX {
             warnings.push("Un umbral muy alto puede descartar contexto útil.".to_string());
         }
-        if self.embedding_dimensions < 64 {
+        if self.embedding_dimensions < EMBEDDING_WARNING_MIN {
             warnings.push(
                 "Una dimensionalidad de embedding muy baja reduce la calidad semántica."
                     .to_string(),
@@ -112,6 +129,10 @@ pub struct IngestConfig {
     pub max_archive_mb: u64,
     /// Máximo de páginas PDF procesadas por documento.
     pub max_pages: usize,
+    /// Máximo de texto extraído por página PDF, en MiB.
+    pub max_pdf_page_text_mb: u64,
+    /// Máximo de texto extraído por documento PDF, en MiB.
+    pub max_pdf_text_mb: u64,
     /// Tiempo máximo de espera para cada herramienta externa, en segundos.
     pub process_timeout_secs: u64,
     /// Máximo aproximado de píxeles por página al rasterizar para OCR.
@@ -123,12 +144,14 @@ impl Default for IngestConfig {
         Self {
             ocr_enabled: true,
             ocr_languages: vec!["spa".to_string()],
-            min_text_chars: 24,
-            max_file_mb: 100,
-            max_archive_mb: 512,
-            max_pages: 500,
-            process_timeout_secs: 120,
-            max_ocr_image_pixels: 20_000_000,
+            min_text_chars: raggy_docs::limits::DEFAULT_MIN_TEXT_CHARS,
+            max_file_mb: raggy_docs::limits::DEFAULT_MAX_FILE_MIB,
+            max_archive_mb: raggy_docs::limits::DEFAULT_MAX_ARCHIVE_MIB,
+            max_pages: raggy_docs::limits::DEFAULT_MAX_PAGES,
+            max_pdf_page_text_mb: raggy_docs::limits::DEFAULT_MAX_PDF_PAGE_TEXT_MIB,
+            max_pdf_text_mb: raggy_docs::limits::DEFAULT_MAX_PDF_TEXT_MIB,
+            process_timeout_secs: raggy_docs::limits::DEFAULT_PROCESS_TIMEOUT_SECS,
+            max_ocr_image_pixels: raggy_docs::limits::DEFAULT_MAX_OCR_IMAGE_PIXELS,
         }
     }
 }
@@ -290,9 +313,11 @@ impl AppConfig {
                 self.model.temperature
             )));
         }
-        if !(0.0..=1.0).contains(&self.rag.similarity_threshold) {
+        if !(MIN_SIMILARITY_THRESHOLD..=MAX_SIMILARITY_THRESHOLD)
+            .contains(&self.rag.similarity_threshold)
+        {
             return Err(CoreError::InvalidConfig(format!(
-                "el umbral de similitud debe estar entre 0.0 y 1.0 (valor: {})",
+                "el umbral de similitud debe estar entre {MIN_SIMILARITY_THRESHOLD} y {MAX_SIMILARITY_THRESHOLD} (valor: {})",
                 self.rag.similarity_threshold
             )));
         }
@@ -311,9 +336,11 @@ impl AppConfig {
                 "top-k debe ser al menos 1".to_string(),
             ));
         }
-        if !(16..=8192).contains(&self.rag.embedding_dimensions) {
+        if !(MIN_EMBEDDING_DIMENSIONS..=MAX_EMBEDDING_DIMENSIONS)
+            .contains(&self.rag.embedding_dimensions)
+        {
             return Err(CoreError::InvalidConfig(format!(
-                "la dimensionalidad del embedding debe estar entre 16 y 8192 (valor: {})",
+                "la dimensionalidad del embedding debe estar entre {MIN_EMBEDDING_DIMENSIONS} y {MAX_EMBEDDING_DIMENSIONS} (valor: {})",
                 self.rag.embedding_dimensions
             )));
         }
@@ -328,30 +355,72 @@ impl AppConfig {
                 "el OCR está activado pero no hay idiomas configurados".to_string(),
             ));
         }
-        if self.ingest.max_file_mb == 0 || self.ingest.max_file_mb > 16_384 {
+        if self.ingest.max_file_mb == 0
+            || self.ingest.max_file_mb > raggy_docs::limits::MAX_MAX_FILE_MIB
+        {
+            return Err(CoreError::InvalidConfig(format!(
+                "el límite de tamaño de archivo debe estar entre 1 y {} MiB",
+                raggy_docs::limits::MAX_MAX_FILE_MIB
+            )));
+        }
+        if self.ingest.max_archive_mb == 0
+            || self.ingest.max_archive_mb > raggy_docs::limits::MAX_MAX_ARCHIVE_MIB
+        {
+            return Err(CoreError::InvalidConfig(format!(
+                "el límite de descompresión debe estar entre 1 y {} MiB",
+                raggy_docs::limits::MAX_MAX_ARCHIVE_MIB
+            )));
+        }
+        if self.ingest.max_pages == 0 || self.ingest.max_pages > raggy_docs::limits::MAX_MAX_PAGES {
+            return Err(CoreError::InvalidConfig(format!(
+                "el máximo de páginas debe estar entre 1 y {}",
+                raggy_docs::limits::MAX_MAX_PAGES
+            )));
+        }
+        if self.ingest.max_pdf_page_text_mb == 0
+            || self.ingest.max_pdf_page_text_mb > raggy_docs::limits::MAX_MAX_PDF_PAGE_TEXT_MIB
+        {
+            return Err(CoreError::InvalidConfig(format!(
+                "el límite de texto por página PDF debe estar entre 1 y {} MiB",
+                raggy_docs::limits::MAX_MAX_PDF_PAGE_TEXT_MIB
+            )));
+        }
+        if self.ingest.max_pdf_text_mb == 0
+            || self.ingest.max_pdf_text_mb > raggy_docs::limits::MAX_MAX_PDF_TEXT_MIB
+        {
+            return Err(CoreError::InvalidConfig(format!(
+                "el límite de texto PDF debe estar entre 1 y {} MiB",
+                raggy_docs::limits::MAX_MAX_PDF_TEXT_MIB
+            )));
+        }
+        if self.ingest.max_pdf_page_text_mb > self.ingest.max_pdf_text_mb {
             return Err(CoreError::InvalidConfig(
-                "el límite de tamaño de archivo debe estar entre 1 y 16384 MiB".to_string(),
+                "el límite de texto por página PDF no puede superar el del documento".to_string(),
             ));
         }
-        if self.ingest.max_archive_mb == 0 || self.ingest.max_archive_mb > 32_768 {
-            return Err(CoreError::InvalidConfig(
-                "el límite de descompresión debe estar entre 1 y 32768 MiB".to_string(),
-            ));
+        if self.ingest.process_timeout_secs == 0
+            || self.ingest.process_timeout_secs > raggy_docs::limits::MAX_PROCESS_TIMEOUT_SECS
+        {
+            return Err(CoreError::InvalidConfig(format!(
+                "el tiempo máximo de herramienta debe estar entre 1 y {} segundos",
+                raggy_docs::limits::MAX_PROCESS_TIMEOUT_SECS
+            )));
         }
-        if self.ingest.max_pages == 0 || self.ingest.max_pages > 100_000 {
-            return Err(CoreError::InvalidConfig(
-                "el máximo de páginas debe estar entre 1 y 100000".to_string(),
-            ));
+        if !(raggy_docs::limits::MIN_MAX_OCR_IMAGE_PIXELS
+            ..=raggy_docs::limits::MAX_MAX_OCR_IMAGE_PIXELS)
+            .contains(&self.ingest.max_ocr_image_pixels)
+        {
+            return Err(CoreError::InvalidConfig(format!(
+                "el máximo de píxeles OCR debe estar entre {} y {}",
+                raggy_docs::limits::MIN_MAX_OCR_IMAGE_PIXELS,
+                raggy_docs::limits::MAX_MAX_OCR_IMAGE_PIXELS
+            )));
         }
-        if self.ingest.process_timeout_secs == 0 || self.ingest.process_timeout_secs > 3600 {
-            return Err(CoreError::InvalidConfig(
-                "el tiempo máximo de herramienta debe estar entre 1 y 3600 segundos".to_string(),
-            ));
-        }
-        if !(262_144..=67_108_864).contains(&self.ingest.max_ocr_image_pixels) {
-            return Err(CoreError::InvalidConfig(
-                "el máximo de píxeles OCR debe estar entre 262144 y 67108864".to_string(),
-            ));
+        if self.ingest.min_text_chars > raggy_docs::limits::MAX_MIN_TEXT_CHARS {
+            return Err(CoreError::InvalidConfig(format!(
+                "el mínimo de texto por página no puede superar {} caracteres",
+                raggy_docs::limits::MAX_MIN_TEXT_CHARS
+            )));
         }
         Ok(())
     }
@@ -465,6 +534,8 @@ mod tests {
                 .expect("configuración anterior compatible");
         assert_eq!(old.theme, Theme::Dark);
         assert_eq!(old.privacy_notice_version, 0);
+        assert_eq!(old.ingest.max_pdf_page_text_mb, 8);
+        assert_eq!(old.ingest.max_pdf_text_mb, 64);
     }
 
     #[test]
@@ -472,6 +543,16 @@ mod tests {
         let config = AppConfig {
             ingest: IngestConfig {
                 max_pages: 0,
+                ..IngestConfig::default()
+            },
+            ..AppConfig::default()
+        };
+        assert!(config.validate().is_err());
+
+        let config = AppConfig {
+            ingest: IngestConfig {
+                max_pdf_page_text_mb: 65,
+                max_pdf_text_mb: 64,
                 ..IngestConfig::default()
             },
             ..AppConfig::default()

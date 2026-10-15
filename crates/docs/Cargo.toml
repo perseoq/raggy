@@ -1,6 +1,6 @@
 [package]
 name = "raggy-docs"
-description = "Extracción de texto de documentos (texto y CSV en esta fase) para el RAG."
+description = "Extracción de texto de documentos, OCR y conversión de formatos legacy para el RAG."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

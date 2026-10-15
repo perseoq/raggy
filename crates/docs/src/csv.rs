@@ -5,10 +5,9 @@
 //! emite con su número real (la cabecera es la fila 1). La ubicación cita
 //! `hoja 1, A2:C100`.
 
-use crate::{column_letter, DocKind, ExtractError, ExtractedDocument, Location, Result, Section};
-
-/// Número de filas de datos por sección.
-const ROWS_PER_SECTION: usize = 100;
+use crate::{
+    column_letter, limits, DocKind, ExtractError, ExtractedDocument, Location, Result, Section,
+};
 
 /// Extrae un CSV como una o varias secciones, una por lote de filas.
 pub fn extract(bytes: &[u8]) -> Result<ExtractedDocument> {
@@ -52,7 +51,7 @@ pub fn extract(bytes: &[u8]) -> Result<ExtractedDocument> {
         }
         last_row = row_number;
         batch.push(format!("{row_number} | {line}"));
-        if batch.len() >= ROWS_PER_SECTION {
+        if batch.len() >= limits::ROWS_PER_SECTION {
             sections.push(make_section(
                 columns.clone(),
                 &header_line,

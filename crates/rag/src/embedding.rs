@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::text::{fnv1a, tokenize};
 
+/// Valores estándar de la dimensionalidad local de embeddings.
+pub const DEFAULT_EMBEDDING_DIMENSIONS: usize = 512;
+pub const MIN_EMBEDDING_DIMENSIONS: usize = 16;
+
 /// Vector de embedding junto con su dimensionalidad implícita.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Embedding {
@@ -59,14 +63,14 @@ impl HashingEmbedding {
     /// Crea el backend con la dimensionalidad indicada.
     pub fn new(dimensions: usize) -> Self {
         Self {
-            dimensions: dimensions.max(16),
+            dimensions: dimensions.max(MIN_EMBEDDING_DIMENSIONS),
         }
     }
 }
 
 impl Default for HashingEmbedding {
     fn default() -> Self {
-        Self::new(512)
+        Self::new(DEFAULT_EMBEDDING_DIMENSIONS)
     }
 }
 

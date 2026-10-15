@@ -16,7 +16,7 @@ A continuación, las historias de usuario organizadas por épica, con formato es
 - Al pulsarlo se abre el diálogo nativo del sistema operativo.
 - Solo se aceptan carpetas (no archivos sueltos).
 - Tras seleccionar, la carpeta aparece en el panel lateral con estado "Indexando…".
-- Al finalizar, el estado cambia a "Indexada" con contador de archivos `.md` procesados.
+- Al finalizar, el estado cambia a "Indexada" con contador de archivos compatibles procesados.
 
 ---
 
@@ -29,7 +29,7 @@ documentos soportados,
 **Criterios de aceptación:**
 - Se recorren todas las subcarpetas.
 - Se procesan Markdown, texto, código, CSV, Word (`.docx`/`.doc`), Excel
-  (`.xlsx`/`.xls`), PowerPoint (`.pptx`/`.ppt`) y PDF.
+  (`.xlsx`/`.xls`/`.xlsm`/`.xlsb`), PowerPoint (`.pptx`/`.ppt`) y PDF.
 - Se muestra progreso durante la indexación.
 - Los archivos vacíos, ilegibles o que necesiten una herramienta ausente
   (OCR/LibreOffice) se reportan con un aviso, pero no detienen el proceso.
@@ -38,7 +38,7 @@ documentos soportados,
 
 ### HU-03: Re-indexación incremental
 **Como** usuario,
-**quiero** que al modificar o añadir archivos `.md` la app actualice el índice automáticamente,
+**quiero** que al modificar o añadir archivos indexables la app actualice el índice automáticamente,
 **para** mantener el conocimiento siempre actualizado sin reindexar todo.
 
 **Criterios de aceptación:**

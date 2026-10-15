@@ -98,7 +98,10 @@ impl Ocr {
             crate::temp_directory("ocr").map_err(|error| ExtractError::Parse(error.to_string()))?;
         let prefix = directory.path().join("page");
         let page_number = page.to_string();
-        let max_dimension = (max_pixels as f64).sqrt().floor().clamp(512.0, 8192.0) as u32;
+        let max_dimension = (max_pixels as f64).sqrt().floor().clamp(
+            crate::limits::MIN_OCR_RENDER_DIMENSION as f64,
+            crate::limits::MAX_OCR_RENDER_DIMENSION as f64,
+        ) as u32;
         let max_dimension = max_dimension.to_string();
 
         let mut command = Command::new(pdftoppm);
@@ -203,6 +206,20 @@ fn first_png(directory: &Path) -> Option<PathBuf> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    fn fake_program(directory: &Path, name: &str, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = directory.join(name);
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("crea herramienta falsa");
+        let mut permissions = std::fs::metadata(&path)
+            .expect("lee permisos")
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&path, permissions).expect("marca ejecutable");
+        path
+    }
+
     #[test]
     fn unavailability_es_coherente_con_is_ready() {
         let ocr = Ocr::detect(&["spa".to_string()], 5);
@@ -219,5 +236,40 @@ mod tests {
         // existe). En ningún caso debe entrar en pánico.
         let ocr = Ocr::detect(&["eng".to_string()], 5);
         let _ = ocr.recognize_image(Path::new("/tmp/raggy-no-existe.png"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ejecuta_ocr_y_rasterizado_con_herramientas_falsas() {
+        let directory = crate::temp_directory("ocr-falso").expect("crea entorno de prueba");
+        let tesseract = fake_program(directory.path(), "tesseract", "printf 'texto simulado'");
+        let pdftoppm = fake_program(
+            directory.path(),
+            "pdftoppm",
+            "for prefix do :; done\nprintf 'png' > \"${prefix}-1.png\"",
+        );
+        let ocr = Ocr {
+            languages: vec!["spa".to_string()],
+            tools: Tools {
+                tesseract: Some(tesseract),
+                pdftoppm: Some(pdftoppm),
+                languages: vec!["spa".to_string()],
+                languages_known: true,
+            },
+            timeout_secs: 5,
+        };
+        let image = directory.path().join("pagina.png");
+        std::fs::write(&image, b"imagen").expect("crea imagen sintética");
+
+        assert_eq!(
+            ocr.recognize_image(&image)
+                .expect("ejecuta Tesseract falso"),
+            "texto simulado"
+        );
+        assert_eq!(
+            ocr.recognize_pdf_page(Path::new("documento.pdf"), 1, 1_000_000)
+                .expect("ejecuta Poppler y Tesseract falsos"),
+            "texto simulado"
+        );
     }
 }

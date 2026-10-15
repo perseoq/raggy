@@ -54,9 +54,10 @@ etiqueta ni se publica hasta completar la última.
    intermedias, indica `Fase N de M` y no incrementes la versión.
 6. `git push origin main` después de cada fase/tarea.
 7. **Al cerrar un release** (o la última fase del programa acordado), crea el
-   tag anotado y súbelo. Empujar el tag dispara el
-   workflow `Release`, que compila para Linux/macOS/Windows y publica el GitHub
-   Release con los binarios y sus checksums:
+   tag anotado y súbelo. Empujar el tag dispara el workflow `Release`, que vuelve
+   a ejecutar la CI reusable para ese commit y solo compila/publica si sus
+   pruebas, Clippy, auditoría y compilaciones multiplataforma pasan. La publicación
+   incluye binarios y checksums:
 
    ```bash
    git tag -a v<versión> -m "Raggy Desktop <versión>"

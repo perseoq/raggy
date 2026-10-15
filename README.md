@@ -4,12 +4,12 @@
 [![Release](https://github.com/perseoq/raggy/actions/workflows/release.yml/badge.svg)](https://github.com/perseoq/raggy/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Asistente de IA de escritorio que responde **anclado únicamente a tu
-documentación local**: archivos Markdown y **código** (`.py`, `.rs`, `.cpp`, `.h`,
-`.go`, `.ts`…). Indexas una carpeta o subes archivos sueltos, creas sesiones
-aisladas por contexto y conversas con distintos modelos de lenguaje, obteniendo
-respuestas que **citan el archivo y las líneas** de donde salen… y sin que tu
-documentación salga de tu equipo más allá del proveedor que elijas.
+Asistente de IA de escritorio que responde **anclado únicamente a tus documentos
+locales**: Markdown, texto, código, CSV, Office y PDF. Indexas una carpeta o
+subes archivos sueltos, creas sesiones aisladas por contexto y conversas con
+distintos modelos de lenguaje, obteniendo respuestas con citas verificables de
+archivo y ubicación… y sin que tus documentos salgan del equipo más allá del
+proveedor que elijas.
 
 Escrito en Rust con interfaz nativa (`egui`/`eframe`). Funciona en Linux, macOS y
 Windows.
@@ -22,7 +22,8 @@ Windows.
 - Añade carpetas con el diálogo nativo; se recorren recursivamente **Markdown**
   (`.md`, `.markdown`, `.mdx`), **texto** (`.txt`), **archivos de código**
   (`py`, `rs`, `cpp`, `h`, `go`, `ts`…) y **documentos**: `.csv`, `.docx`,
-  `.xlsx`/`.xls`/`.xlsm`, `.pptx`, `.pdf` y los formatos legacy `.doc`/`.ppt`.
+  `.xlsx`/`.xls`/`.xlsm`/`.xlsb`, `.pptx`, `.pdf` y los formatos legacy
+  `.doc`/`.ppt`.
 - **Extracción de texto por formato**: CSV (filas), Excel (hojas), Word
   (párrafos y títulos), PowerPoint (diapositivas) y PDF (páginas), con citas por
   ubicación (`página 3`, `hoja Ventas`, `filas 1-100`, `diapositiva 2`).
@@ -31,7 +32,7 @@ Windows.
   la app avisa con el comando de instalación de tu sistema. Los `.doc`/`.ppt`
   legacy se convierten con **LibreOffice** si está instalado.
 - **Límites de recursos configurables** en Configuración: tamaño máximo de
-  archivo, expansión de Office, páginas PDF, píxeles OCR y timeout de las
+  archivo, expansión de Office, páginas y texto PDF, píxeles OCR y timeout de las
   herramientas externas. Los archivos que superan los límites se reportan sin
   bloquear indefinidamente la indexación.
 - Botón **Subir archivos** para incorporar archivos sueltos: se copian
@@ -51,8 +52,9 @@ Windows.
 
 ### Búsqueda con recuperación híbrida
 - **Embeddings locales** deterministas, sin modelos ni conexión a internet.
-- Índice vectorial (similitud coseno) + índice léxico **BM25**, fusionados con un
-  umbral de similitud configurable.
+- Índice vectorial (similitud coseno) + índice léxico **BM25 normalizado por la
+  consulta**, fusionados con un umbral configurable. El recuperador se mantiene
+  en caché por carpeta y se renueva al reindexar.
 - Buscador que muestra los fragmentos más relevantes con su puntuación y su cita
   (`archivo.md (líneas 12-20)`) y abre el fragmento exacto al seleccionarlo.
 
@@ -190,6 +192,7 @@ Todo vive en la **carpeta base** `~/.raggydesktop/`:
              "default_provider": "deepseek", "default_model": "deepseek-chat" },
   "ingest": { "ocr_enabled": true, "ocr_languages": ["spa"], "min_text_chars": 24,
                "max_file_mb": 100, "max_archive_mb": 512, "max_pages": 500,
+               "max_pdf_page_text_mb": 8, "max_pdf_text_mb": 64,
                "process_timeout_secs": 120, "max_ocr_image_pixels": 20000000 },
   "data_dir": null,
   "api_keys": {}

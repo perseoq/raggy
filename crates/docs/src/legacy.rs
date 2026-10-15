@@ -186,4 +186,33 @@ mod tests {
             &ExtractOptions::default(),
         );
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn convierte_con_libreoffice_falso_y_respeta_la_ruta_de_salida() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = crate::temp_directory("libreoffice-falso").expect("crea entorno");
+        let soffice = directory.path().join("soffice");
+        std::fs::write(
+            &soffice,
+            "#!/bin/sh\noutdir=''\ninput=''\nnext=''\nfor arg do\n  if [ \"$next\" = outdir ]; then outdir=\"$arg\"; next=''; continue; fi\n  if [ \"$arg\" = --outdir ]; then next=outdir; continue; fi\n  case \"$arg\" in *.doc) input=\"$arg\";; esac\ndone\nname=\"${input##*/}\"\nname=\"${name%.*}\"\nprintf 'convertido' > \"$outdir/$name.docx\"\n",
+        )
+        .expect("escribe herramienta falsa");
+        let mut permissions = std::fs::metadata(&soffice)
+            .expect("lee permisos")
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&soffice, permissions).expect("marca ejecutable");
+
+        let input = directory.path().join("manual.doc");
+        std::fs::write(&input, b"formato legacy").expect("crea documento fuente");
+        let converted = convert(&soffice, &input, LegacyTarget::Word, directory.path(), 5)
+            .expect("convierte con LibreOffice falso");
+        assert_eq!(converted, directory.path().join("manual.docx"));
+        assert_eq!(
+            std::fs::read_to_string(converted).expect("lee convertido"),
+            "convertido"
+        );
+    }
 }

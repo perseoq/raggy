@@ -13,6 +13,7 @@
 pub mod csv;
 pub mod excel;
 pub mod legacy;
+pub mod limits;
 pub mod ocr;
 pub mod pdf;
 pub mod slides;
@@ -40,13 +41,16 @@ pub(crate) fn temp_directory(prefix: &str) -> std::io::Result<tempfile::TempDir>
 
 /// Valida la expansión real de todas las entradas de un ZIP antes de pasar el
 /// archivo a extractores que lo procesan internamente (p. ej. `calamine`).
-pub(crate) fn validate_zip_size(bytes: &[u8], max_uncompressed_bytes: u64) -> Result<()> {
-    const MAX_ENTRIES: usize = 100_000;
+pub(crate) fn validate_zip_size(
+    bytes: &[u8],
+    max_uncompressed_bytes: u64,
+    max_entries: usize,
+) -> Result<()> {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
         .map_err(|error| ExtractError::Parse(format!("paquete Office inválido: {error}")))?;
-    if archive.len() > MAX_ENTRIES {
+    if archive.len() > max_entries {
         return Err(ExtractError::ResourceLimit(format!(
-            "el paquete contiene {} entradas; el máximo es {MAX_ENTRIES}",
+            "el paquete contiene {} entradas; el máximo es {max_entries}",
             archive.len()
         )));
     }
@@ -207,7 +211,23 @@ mod resource_limit_tests {
             .expect("escribe entrada");
         let bytes = writer.finish().expect("cierra zip").into_inner();
 
-        let error = validate_zip_size(&bytes, 64).expect_err("debe superar el límite");
+        let error = validate_zip_size(&bytes, 64, limits::MAX_ARCHIVE_ENTRIES)
+            .expect_err("debe superar el límite");
+        assert!(matches!(error, ExtractError::ResourceLimit(_)));
+    }
+
+    #[test]
+    fn limita_la_cantidad_de_entradas_zip() {
+        use std::io::Write;
+
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default();
+        for name in ["uno.xml", "dos.xml"] {
+            writer.start_file(name, options).expect("abre entrada");
+            writer.write_all(b"x").expect("escribe entrada");
+        }
+        let bytes = writer.finish().expect("cierra ZIP").into_inner();
+        let error = validate_zip_size(&bytes, 1024, 1).expect_err("excede el número permitido");
         assert!(matches!(error, ExtractError::ResourceLimit(_)));
     }
 
@@ -414,6 +434,10 @@ pub struct ExtractOptions {
     pub max_archive_bytes: u64,
     /// Máximo de páginas PDF a extraer.
     pub max_pages: usize,
+    /// Máximo de bytes de texto conservado por página PDF.
+    pub max_pdf_page_text_bytes: u64,
+    /// Máximo total de bytes de texto conservado por documento PDF.
+    pub max_pdf_text_bytes: u64,
     /// Tiempo máximo de espera de cada herramienta externa, en segundos.
     pub process_timeout_secs: u64,
     /// Máximo de píxeles por página durante el OCR.
@@ -425,12 +449,14 @@ impl Default for ExtractOptions {
         Self {
             ocr_enabled: true,
             ocr_languages: vec!["spa".to_string()],
-            min_text_chars: 24,
-            max_file_bytes: 100 * 1024 * 1024,
-            max_archive_bytes: 512 * 1024 * 1024,
-            max_pages: 500,
-            process_timeout_secs: 120,
-            max_ocr_image_pixels: 20_000_000,
+            min_text_chars: limits::DEFAULT_MIN_TEXT_CHARS,
+            max_file_bytes: limits::DEFAULT_MAX_FILE_MIB * limits::BYTES_PER_MIB,
+            max_archive_bytes: limits::DEFAULT_MAX_ARCHIVE_MIB * limits::BYTES_PER_MIB,
+            max_pages: limits::DEFAULT_MAX_PAGES,
+            max_pdf_page_text_bytes: limits::DEFAULT_MAX_PDF_PAGE_TEXT_MIB * limits::BYTES_PER_MIB,
+            max_pdf_text_bytes: limits::DEFAULT_MAX_PDF_TEXT_MIB * limits::BYTES_PER_MIB,
+            process_timeout_secs: limits::DEFAULT_PROCESS_TIMEOUT_SECS,
+            max_ocr_image_pixels: limits::DEFAULT_MAX_OCR_IMAGE_PIXELS,
         }
     }
 }

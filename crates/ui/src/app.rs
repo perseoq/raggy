@@ -13,10 +13,9 @@ use raggy_core::chat::{compose_request, context_from_retrieved};
 use raggy_core::index::{IndexEvent, IndexOptions, IndexPhase, IndexWorker};
 use raggy_core::watch::FolderWatcher;
 use raggy_core::{
-    artifacts_for_prompt, relative_to, resolve_key, save_artifact, search_folder, tools_report,
-    AppConfig, AppPaths, ChatEvent, ChatWorker, ConflictPolicy, ExtractOptions, IngestConfig,
-    ProviderFactory, RagConfig, SaveOutcome, SecretStore, SettingsStore, Theme, APP_NAME,
-    APP_VERSION,
+    artifacts_for_prompt, relative_to, resolve_key, save_artifact, tools_report, AppConfig,
+    AppPaths, ChatEvent, ChatWorker, ConflictPolicy, ExtractOptions, IngestConfig, ProviderFactory,
+    RagConfig, SaveOutcome, SearchCache, SecretStore, SettingsStore, Theme, APP_NAME, APP_VERSION,
 };
 use raggy_llm::{extract_code_blocks, suggest_filename, CodeBlock, ProviderId};
 use raggy_rag::{
@@ -193,6 +192,7 @@ pub struct RaggyApp {
     last_watch: HashMap<String, Instant>,
     query: String,
     results: Vec<RetrievedChunk>,
+    search_cache: SearchCache,
     search_note: Option<String>,
     sessions: Vec<Session>,
     active_session: Option<Session>,
@@ -260,6 +260,7 @@ impl RaggyApp {
             last_watch: HashMap::new(),
             query: String::new(),
             results: Vec::new(),
+            search_cache: SearchCache::default(),
             search_note: None,
             sessions: Vec::new(),
             active_session: None,
@@ -480,9 +481,15 @@ impl RaggyApp {
                 ocr_enabled: self.config.ingest.ocr_enabled,
                 ocr_languages: self.config.ingest.ocr_languages.clone(),
                 min_text_chars: self.config.ingest.min_text_chars,
-                max_file_bytes: self.config.ingest.max_file_mb * 1024 * 1024,
-                max_archive_bytes: self.config.ingest.max_archive_mb * 1024 * 1024,
+                max_file_bytes: self.config.ingest.max_file_mb
+                    * raggy_core::ingest_limits::BYTES_PER_MIB,
+                max_archive_bytes: self.config.ingest.max_archive_mb
+                    * raggy_core::ingest_limits::BYTES_PER_MIB,
                 max_pages: self.config.ingest.max_pages,
+                max_pdf_page_text_bytes: self.config.ingest.max_pdf_page_text_mb
+                    * raggy_core::ingest_limits::BYTES_PER_MIB,
+                max_pdf_text_bytes: self.config.ingest.max_pdf_text_mb
+                    * raggy_core::ingest_limits::BYTES_PER_MIB,
                 process_timeout_secs: self.config.ingest.process_timeout_secs,
                 max_ocr_image_pixels: self.config.ingest.max_ocr_image_pixels,
             },
@@ -805,7 +812,13 @@ impl RaggyApp {
         let dimensions = self.config.rag.embedding_dimensions;
         let (blocks, citations) = match &self.storage {
             Some(storage) => {
-                match search_folder(storage, &session.folder_id, &prompt, &options, dimensions) {
+                match self.search_cache.search_folder(
+                    storage,
+                    &session.folder_id,
+                    &prompt,
+                    &options,
+                    dimensions,
+                ) {
                     Ok(chunks) => context_from_retrieved(&chunks),
                     Err(error) => {
                         self.chat_error = Some(format!("Error al recuperar contexto: {error}"));
@@ -1353,6 +1366,7 @@ impl RaggyApp {
             }
         }
         self.entries.retain(|entry| entry.folder.id != id);
+        self.search_cache.invalidate_folder(id);
         if self.selected_folder.as_deref() == Some(id) {
             self.selected_folder = None;
             self.active_session = None;
@@ -1386,6 +1400,7 @@ impl RaggyApp {
                     }
                 }
                 IndexEvent::Finished(summary) => {
+                    self.search_cache.invalidate_folder(&summary.folder_id);
                     if let Some(entry) = self
                         .entries
                         .iter_mut()
@@ -1787,7 +1802,7 @@ impl RaggyApp {
                     ui.add_space(96.0);
                     ui.heading(APP_NAME);
                     ui.add_space(8.0);
-                    ui.label("Añade una carpeta con archivos Markdown para indexarla.");
+                    ui.label("Añade una carpeta con documentos compatibles para indexarla.");
                     ui.add_space(16.0);
                     ui.label("Después podrás buscar en su contenido o iniciar una sesión de chat.");
                 });
@@ -2751,28 +2766,43 @@ impl RaggyApp {
                     .num_columns(2)
                     .show(ui, |ui| {
                         ui.label("Tamaño de fragmento (caracteres)");
-                        ui.add(egui::DragValue::new(&mut draft.chunk_size).range(100..=4000));
+                        ui.add(
+                            egui::DragValue::new(&mut draft.chunk_size)
+                                .range(raggy_core::MIN_CHUNK_SIZE..=raggy_core::MAX_CHUNK_SIZE),
+                        );
                         ui.end_row();
 
                         ui.label("Solapamiento (caracteres)");
-                        ui.add(egui::DragValue::new(&mut draft.chunk_overlap).range(0..=2000));
+                        ui.add(
+                            egui::DragValue::new(&mut draft.chunk_overlap)
+                                .range(0..=raggy_core::MAX_CHUNK_OVERLAP),
+                        );
                         ui.end_row();
 
                         ui.label("Fragmentos recuperados (top-k)");
-                        ui.add(egui::DragValue::new(&mut draft.top_k).range(1..=50));
+                        ui.add(
+                            egui::DragValue::new(&mut draft.top_k)
+                                .range(1..=raggy_core::MAX_TOP_K),
+                        );
                         ui.end_row();
 
                         ui.label("Umbral de similitud");
                         ui.add(
                             egui::DragValue::new(&mut draft.similarity_threshold)
-                                .range(0.0..=1.0)
+                                .range(
+                                    raggy_core::MIN_SIMILARITY_THRESHOLD
+                                        ..=raggy_core::MAX_SIMILARITY_THRESHOLD,
+                                )
                                 .speed(0.01),
                         );
                         ui.end_row();
 
                         ui.label("Dimensionalidad del embedding");
                         ui.add(
-                            egui::DragValue::new(&mut draft.embedding_dimensions).range(16..=4096),
+                            egui::DragValue::new(&mut draft.embedding_dimensions).range(
+                                raggy_core::MIN_EMBEDDING_DIMENSIONS
+                                    ..=raggy_core::MAX_EMBEDDING_DIMENSIONS,
+                            ),
                         );
                         ui.end_row();
                     });
@@ -2806,7 +2836,7 @@ impl RaggyApp {
                     ui.label("Texto mínimo por página para no usar OCR");
                     ui.add(
                         egui::DragValue::new(&mut self.settings_ingest.min_text_chars)
-                            .range(0..=5000),
+                            .range(0..=raggy_core::ingest_limits::MAX_MIN_TEXT_CHARS),
                     );
                 });
                 egui::Grid::new("ingest_limits_grid")
@@ -2815,33 +2845,52 @@ impl RaggyApp {
                         ui.label("Tamaño máximo de archivo (MiB)");
                         ui.add(
                             egui::DragValue::new(&mut self.settings_ingest.max_file_mb)
-                                .range(1..=16_384),
+                                .range(1..=raggy_core::ingest_limits::MAX_MAX_FILE_MIB),
                         );
                         ui.end_row();
 
                         ui.label("Descompresión máxima Office (MiB)");
                         ui.add(egui::DragValue::new(
                             &mut self.settings_ingest.max_archive_mb,
-                        ).range(1..=32_768));
+                        ).range(1..=raggy_core::ingest_limits::MAX_MAX_ARCHIVE_MIB));
                         ui.end_row();
 
                         ui.label("Máximo de páginas PDF");
                         ui.add(
                             egui::DragValue::new(&mut self.settings_ingest.max_pages)
-                                .range(1..=100_000),
+                                .range(1..=raggy_core::ingest_limits::MAX_MAX_PAGES),
+                        );
+                        ui.end_row();
+
+                        ui.label("Máximo de texto por página PDF (MiB)");
+                        ui.add(
+                            egui::DragValue::new(
+                                &mut self.settings_ingest.max_pdf_page_text_mb,
+                            )
+                            .range(1..=raggy_core::ingest_limits::MAX_MAX_PDF_PAGE_TEXT_MIB),
+                        );
+                        ui.end_row();
+
+                        ui.label("Máximo de texto por documento PDF (MiB)");
+                        ui.add(
+                            egui::DragValue::new(&mut self.settings_ingest.max_pdf_text_mb)
+                                .range(1..=raggy_core::ingest_limits::MAX_MAX_PDF_TEXT_MIB),
                         );
                         ui.end_row();
 
                         ui.label("Tiempo máximo por herramienta (segundos)");
                         ui.add(egui::DragValue::new(
                             &mut self.settings_ingest.process_timeout_secs,
-                        ).range(1..=3600));
+                        ).range(1..=raggy_core::ingest_limits::MAX_PROCESS_TIMEOUT_SECS));
                         ui.end_row();
 
                         ui.label("Píxeles máximos por página OCR");
                         ui.add(egui::DragValue::new(
                             &mut self.settings_ingest.max_ocr_image_pixels,
-                        ).range(262_144..=67_108_864));
+                        ).range(
+                            raggy_core::ingest_limits::MIN_MAX_OCR_IMAGE_PIXELS
+                                ..=raggy_core::ingest_limits::MAX_MAX_OCR_IMAGE_PIXELS,
+                        ));
                         ui.end_row();
                     });
                 ui.horizontal(|ui| {
@@ -3368,7 +3417,10 @@ impl RaggyApp {
             return;
         };
 
-        match search_folder(storage, &folder_id, &query, &options, dimensions) {
+        match self
+            .search_cache
+            .search_folder(storage, &folder_id, &query, &options, dimensions)
+        {
             Ok(results) => {
                 self.search_note = Some(if results.is_empty() {
                     format!(

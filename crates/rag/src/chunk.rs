@@ -2,6 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Valores estándar del chunking semántico.
+pub const DEFAULT_CHUNK_SIZE: usize = 800;
+pub const DEFAULT_CHUNK_OVERLAP: usize = 100;
+
 /// Metadatos de trazabilidad de un fragmento (HU-11).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChunkMetadata {
@@ -40,7 +44,7 @@ pub struct Chunk {
 pub struct ChunkSource<'a> {
     /// Ruta relativa mostrada al usuario.
     pub relative_path: &'a str,
-    /// Contenido completo del archivo Markdown.
+    /// Contenido completo del archivo que procesa el chunker semántico.
     pub content: &'a str,
 }
 
@@ -56,8 +60,8 @@ pub struct ChunkingOptions {
 impl Default for ChunkingOptions {
     fn default() -> Self {
         Self {
-            max_chars: 800,
-            overlap_chars: 100,
+            max_chars: DEFAULT_CHUNK_SIZE,
+            overlap_chars: DEFAULT_CHUNK_OVERLAP,
         }
     }
 }

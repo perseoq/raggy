@@ -10,43 +10,53 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.2.0] - 2026-10-14
+
+### Añadido
+
+- Límites configurables para el texto extraído por página y por documento PDF;
+  las configuraciones previas reciben los valores por defecto al cargarse.
+- `SearchCache` para conservar los recuperadores por carpeta y refrescarlos solo
+  cuando cambia la revisión del índice.
+- Pruebas de regresión con libros XLSX y PDF reales y ejecutables simulados para
+  OCR/Poppler y conversión LibreOffice, sin depender de herramientas instaladas.
+
+### Cambiado
+
+- BM25 normaliza su puntuación según la cantidad de términos de consulta, ignora
+  repeticiones y conserva la importancia absoluta de términos comunes; la fusión
+  ya no reescala cada lista para forzar el mejor resultado a `1.0`.
+- Los parámetros del recuperador híbrido (peso vectorial, BM25 y pool de
+  candidatos) y los límites de extracción tienen valores centrales y opciones
+  explícitas. La interfaz reutiliza el índice hasta que se completa una
+  reindexación.
+- El workflow `Release` llama a la CI para el commit etiquetado y no publica
+  binarios si fallan las pruebas, auditoría o compilaciones multiplataforma.
+- Se actualizaron plan, historias de usuario, stack y comentarios para reflejar
+  `settings.json`, los formatos actualmente admitidos y el almacenamiento de
+  claves sin cifrar.
+
 ### Corregido
 
-- **Fase 1 de correcciones 2.2.0 — secretos y aviso de privacidad**: guardar o
-  cerrar preferencias ya conserva las claves más recientes del almacén y no
-  resucita las eliminadas; `SettingsStore` serializa las modificaciones de
-  claves; se zeroizan copias temporales y las claves de los proveedores al
-  liberar los clientes. El aviso de privacidad vuelve a mostrarse cuando cambia
-  su versión e informa del historial que se envía al proveedor y del
-  almacenamiento no cifrado de las claves.
-- **Fase 2 de correcciones 2.2.0 — índice fiable**: los documentos guardan una
-  huella de las opciones, versión del pipeline y herramientas externas; cambiar
-  chunking, embeddings, OCR o instalar Tesseract/Poppler/LibreOffice fuerza una
-  reindexación aunque los bytes del archivo no cambien. Si el recorrido del
-  sistema de archivos es incompleto, no se borran del índice rutas no vistas.
+- **Fase 1 — secretos y privacidad**: guardar o cerrar preferencias conserva las
+  claves más recientes y no resucita las eliminadas; `SettingsStore` serializa
+  cambios; se zeroizan copias temporales. El aviso versionado describe los datos
+  enviados al proveedor y el almacenamiento no cifrado de las claves.
+- **Fase 2 — índice fiable**: una huella de opciones y herramientas fuerza la
+  reindexación necesaria; recorridos incompletos no eliminan rutas no vistas y
   SQLite espera hasta 5 segundos ante escrituras concurrentes.
-- **Fase 3 de correcciones 2.2.0 — archivos seguros**: el guardado de artefactos
-  usa un descriptor de directorio confinado a la carpeta elegida y no sigue
-  enlaces simbólicos que escapen de ella. Los temporales de OCR y conversión
-  ahora son privados, impredecibles y se limpian automáticamente.
-- **Fase 4 de correcciones 2.2.0 — límites de recursos**: opciones de ingesta
-  para tamaño máximo de archivo, expansión de paquetes Office, páginas PDF,
-  tiempo máximo de Tesseract/Poppler/LibreOffice y píxeles OCR. La expansión ZIP
-  se mide al descomprimir y el texto PDF tiene un tope por página y documento.
-- **Fase 5 de correcciones 2.2.0 — respaldos completos**: se incluyen archivos
-  subidos y los archivos físicos de artefactos registrados. La importación valida
-  nombres, integridad y límites de tamaño/entradas; extrae en un directorio
-  temporal privado con limpieza automática, reubica subidas/artefactos y apunta
-  settings.json al nuevo directorio sin pisar la base activa.
-- **Fase 6 de correcciones 2.2.0 — citas verificables y navegables**: la búsqueda,
-  el panel de fragmentos, el chat y la exportación usan la misma etiqueta con la
-  ubicación propia de cada formato. Las citas de chat abren el fragmento exacto;
-  solo referencias presentes literalmente en las fuentes recuperadas se guardan
-  y cuentan como ancladas, incluso al volver a leer mensajes antiguos.
-- **Fase 4 de correcciones 2.2.0 — límites de recursos**: límites configurables
-  para tamaño de entrada, expansión de paquetes Office, páginas PDF y píxeles
-  OCR; timeout configurable de Tesseract/Poppler/LibreOffice. La extracción ZIP
-  comprueba los bytes realmente descomprimidos antes de invocar parsers.
+- **Fase 3 — archivos seguros**: artefactos confinados a la carpeta elegida y
+  temporales privados, impredecibles y con limpieza automática.
+- **Fase 4 — límites de recursos**: tamaños de entrada y expansión Office,
+  páginas y texto PDF, píxeles OCR y tiempos de herramientas quedan acotados.
+  La expansión ZIP se mide realmente antes de invocar los extractores.
+- **Fase 5 — respaldos completos**: se incluyen archivos subidos y artefactos
+  físicos registrados; restauración validada en un directorio temporal privado,
+  reubicación de rutas y actualización de `settings.json` sin pisar la base activa.
+- **Fase 6 — citas verificables y navegables**: búsqueda, panel de fragmentos,
+  chat y exportación usan una etiqueta con la ubicación propia del formato. Los
+  enlaces abren el fragmento exacto y solo citas literales de fuentes recuperadas
+  cuentan como ancladas, incluso al releer mensajes antiguos.
 
 ## [2.1.0] - 2026-10-14
 

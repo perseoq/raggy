@@ -17,14 +17,20 @@ pub mod section;
 pub mod text;
 pub mod vector;
 
-pub use bm25::Bm25Index;
-pub use chunk::{Chunk, ChunkMetadata, ChunkSource, Chunker, ChunkingOptions};
+pub use bm25::{Bm25Index, Bm25Parameters, DEFAULT_BM25_B, DEFAULT_BM25_K1};
+pub use chunk::{
+    Chunk, ChunkMetadata, ChunkSource, Chunker, ChunkingOptions, DEFAULT_CHUNK_OVERLAP,
+    DEFAULT_CHUNK_SIZE,
+};
 pub use embedding::{
     cosine_similarity, Embedding, EmbeddingBackend, EmbeddingProvider, HashingEmbedding,
+    DEFAULT_EMBEDDING_DIMENSIONS, MIN_EMBEDDING_DIMENSIONS,
 };
 pub use markdown::MarkdownChunker;
 pub use retriever::{
-    verify_citations, Citation, HybridRetriever, RetrievedChunk, Retriever, RetrieverOptions,
+    verify_citations, Citation, HybridRetriever, HybridRetrieverOptions, RetrievedChunk, Retriever,
+    RetrieverOptions, DEFAULT_CANDIDATE_MULTIPLIER, DEFAULT_MIN_SCORE, DEFAULT_TOP_K,
+    DEFAULT_VECTOR_WEIGHT, MIN_CANDIDATE_POOL,
 };
 pub use section::{chunk_sections, DocumentSection, SectionLocation};
 pub use vector::VectorIndex;

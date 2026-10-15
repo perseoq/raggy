@@ -38,7 +38,7 @@ impl Default for IndexOptions {
     fn default() -> Self {
         Self {
             chunking: ChunkingOptions::default(),
-            embedding_dimensions: 512,
+            embedding_dimensions: raggy_rag::DEFAULT_EMBEDDING_DIMENSIONS,
             extract: ExtractOptions::default(),
         }
     }
@@ -167,7 +167,7 @@ fn processing_fingerprint(options: &IndexOptions) -> String {
         .unwrap_or_else(|| "ausente".to_string());
     let embedding = HashingEmbedding::new(options.embedding_dimensions);
     let descriptor = format!(
-        "pipeline={INDEX_PIPELINE_VERSION};chunk_size={};chunk_overlap={};embedding_name={};embedding_dimensions={};ocr_enabled={};ocr_languages={};min_text_chars={};max_file_bytes={};max_archive_bytes={};max_pages={};process_timeout_secs={};max_ocr_image_pixels={};tesseract={};tesseract_languages={};pdftoppm={};libreoffice={}",
+        "pipeline={INDEX_PIPELINE_VERSION};chunk_size={};chunk_overlap={};embedding_name={};embedding_dimensions={};ocr_enabled={};ocr_languages={};min_text_chars={};max_file_bytes={};max_archive_bytes={};max_pages={};max_pdf_page_text_bytes={};max_pdf_text_bytes={};process_timeout_secs={};max_ocr_image_pixels={};tesseract={};tesseract_languages={};pdftoppm={};libreoffice={}",
         options.chunking.max_chars,
         options.chunking.overlap_chars,
         embedding.name(),
@@ -178,6 +178,8 @@ fn processing_fingerprint(options: &IndexOptions) -> String {
         options.extract.max_file_bytes,
         options.extract.max_archive_bytes,
         options.extract.max_pages,
+        options.extract.max_pdf_page_text_bytes,
+        options.extract.max_pdf_text_bytes,
         options.extract.process_timeout_secs,
         options.extract.max_ocr_image_pixels,
         path_label(&tools.tesseract),

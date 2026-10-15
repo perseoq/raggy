@@ -14,9 +14,22 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  ci:
+    name: Verificación previa a la publicación
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+      security-events: write
+    secrets: inherit
+
   build:
     name: Compilar (${{ matrix.os }})
+    needs: ci
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -91,6 +104,8 @@ jobs:
     name: Publicar
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Descargar artefactos
         uses: actions/download-artifact@v8

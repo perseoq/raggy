@@ -4,10 +4,14 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::bm25::Bm25Index;
+use crate::bm25::{Bm25Index, Bm25Parameters, DEFAULT_BM25_B, DEFAULT_BM25_K1};
 use crate::chunk::Chunk;
 use crate::embedding::EmbeddingProvider;
 use crate::vector::VectorIndex;
+
+/// Valores estándar de recuperación para consultas nuevas.
+pub const DEFAULT_TOP_K: usize = 5;
+pub const DEFAULT_MIN_SCORE: f32 = 0.3;
 
 /// Cita verificable de un fragmento (HU-11).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -133,8 +137,8 @@ pub struct RetrieverOptions {
 impl Default for RetrieverOptions {
     fn default() -> Self {
         Self {
-            top_k: 5,
-            min_score: 0.3,
+            top_k: DEFAULT_TOP_K,
+            min_score: DEFAULT_MIN_SCORE,
         }
     }
 }
@@ -148,25 +152,74 @@ pub trait Retriever: Send + Sync {
 /// Peso de la componente vectorial en la fusión (el resto es BM25).
 pub const DEFAULT_VECTOR_WEIGHT: f32 = 0.5;
 
+/// Número de candidatos evaluados por cada resultado solicitado.
+pub const DEFAULT_CANDIDATE_MULTIPLIER: usize = 4;
+/// Amplitud mínima del pool híbrido para que una lista pequeña de `top_k` no
+/// elimine candidatos antes de fusionar ambas señales.
+pub const MIN_CANDIDATE_POOL: usize = 16;
+
+/// Parámetros del recuperador híbrido, separados de los límites por consulta.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HybridRetrieverOptions {
+    /// Peso vectorial en la puntuación combinada (`0.0..=1.0`).
+    pub vector_weight: f32,
+    /// Parámetros del índice BM25.
+    pub bm25: Bm25Parameters,
+    /// Sobrerrecuperación antes de fusionar resultados.
+    pub candidate_multiplier: usize,
+    /// Mínimo de candidatos antes de fusionar resultados.
+    pub minimum_candidate_pool: usize,
+}
+
+impl Default for HybridRetrieverOptions {
+    fn default() -> Self {
+        Self {
+            vector_weight: DEFAULT_VECTOR_WEIGHT,
+            bm25: Bm25Parameters {
+                k1: DEFAULT_BM25_K1,
+                b: DEFAULT_BM25_B,
+            },
+            candidate_multiplier: DEFAULT_CANDIDATE_MULTIPLIER,
+            minimum_candidate_pool: MIN_CANDIDATE_POOL,
+        }
+    }
+}
+
 /// Recuperador híbrido que combina embeddings locales y BM25.
 pub struct HybridRetriever {
     embedder: Box<dyn EmbeddingProvider>,
     vector: VectorIndex,
     lexical: Bm25Index,
     chunks: HashMap<String, Chunk>,
-    vector_weight: f32,
+    options: HybridRetrieverOptions,
 }
 
 impl HybridRetriever {
     /// Crea el recuperador a partir de un proveedor de embeddings.
     pub fn new(embedder: Box<dyn EmbeddingProvider>) -> Self {
+        Self::with_options(embedder, HybridRetrieverOptions::default())
+    }
+
+    /// Crea el recuperador con pesos BM25/vectorial y amplitud de candidatos
+    /// explícitos para ajustar la recuperación sin cambiar el chunker.
+    pub fn with_options(
+        embedder: Box<dyn EmbeddingProvider>,
+        mut options: HybridRetrieverOptions,
+    ) -> Self {
+        options.vector_weight = if options.vector_weight.is_finite() {
+            options.vector_weight.clamp(0.0, 1.0)
+        } else {
+            DEFAULT_VECTOR_WEIGHT
+        };
+        options.candidate_multiplier = options.candidate_multiplier.max(1);
+        options.minimum_candidate_pool = options.minimum_candidate_pool.max(1);
         let dimensions = embedder.dimensions();
         Self {
             embedder,
             vector: VectorIndex::new(dimensions),
-            lexical: Bm25Index::new(),
+            lexical: Bm25Index::with_parameters(options.bm25),
             chunks: HashMap::new(),
-            vector_weight: DEFAULT_VECTOR_WEIGHT,
+            options,
         }
     }
 
@@ -204,32 +257,29 @@ impl Retriever for HybridRetriever {
             return Vec::new();
         }
 
-        let pool = options.top_k.saturating_mul(4).max(16);
+        let pool = options
+            .top_k
+            .saturating_mul(self.options.candidate_multiplier)
+            .max(self.options.minimum_candidate_pool);
 
         let query_embedding = self.embedder.embed(query).vector;
         let vector_hits = self.vector.search(&query_embedding, pool, f32::MIN);
         let lexical_hits = self.lexical.search(query, pool);
-
-        let lexical_max = lexical_hits
-            .first()
-            .map(|(_, score)| *score)
-            .unwrap_or(0.0)
-            .max(f32::EPSILON);
 
         let mut fused: HashMap<String, (f32, f32)> = HashMap::new();
         for (id, score) in vector_hits {
             fused.entry(id).or_insert((0.0, 0.0)).0 = score.clamp(0.0, 1.0);
         }
         for (id, score) in lexical_hits {
-            fused.entry(id).or_insert((0.0, 0.0)).1 = (score / lexical_max).clamp(0.0, 1.0);
+            fused.entry(id).or_insert((0.0, 0.0)).1 = score.clamp(0.0, 1.0);
         }
 
         let mut results: Vec<RetrievedChunk> = fused
             .into_iter()
             .filter_map(|(id, (vector_score, lexical_score))| {
                 let chunk = self.chunks.get(&id)?.clone();
-                let score =
-                    self.vector_weight * vector_score + (1.0 - self.vector_weight) * lexical_score;
+                let score = self.options.vector_weight * vector_score
+                    + (1.0 - self.options.vector_weight) * lexical_score;
                 Some(RetrievedChunk {
                     chunk,
                     score,
@@ -240,7 +290,11 @@ impl Retriever for HybridRetriever {
             .filter(|result| result.score >= options.min_score)
             .collect();
 
-        results.sort_by(|a, b| b.score.total_cmp(&a.score));
+        results.sort_by(|a, b| {
+            b.score
+                .total_cmp(&a.score)
+                .then_with(|| a.chunk.id.cmp(&b.chunk.id))
+        });
         results.truncate(options.top_k);
         results
     }

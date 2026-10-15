@@ -1,14 +1,30 @@
 //! Índice BM25 para la recuperación léxica.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::text::tokenize;
 
-/// Parámetro de saturación de la frecuencia de término.
-const K1: f32 = 1.2;
+/// Valores BM25 estándar usados si no se especifica otra parametrización.
+pub const DEFAULT_BM25_K1: f32 = 1.2;
+pub const DEFAULT_BM25_B: f32 = 0.75;
 
-/// Parámetro de normalización por longitud del documento.
-const B: f32 = 0.75;
+/// Parámetros del índice léxico; `b` controla cuánto pesa la longitud del texto.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Bm25Parameters {
+    /// Saturación de la frecuencia del término; debe ser mayor que cero.
+    pub k1: f32,
+    /// Normalización por longitud del documento, entre cero y uno.
+    pub b: f32,
+}
+
+impl Default for Bm25Parameters {
+    fn default() -> Self {
+        Self {
+            k1: DEFAULT_BM25_K1,
+            b: DEFAULT_BM25_B,
+        }
+    }
+}
 
 struct Bm25Document {
     id: String,
@@ -17,17 +33,45 @@ struct Bm25Document {
 }
 
 /// Índice BM25 construido incrementando documentos.
-#[derive(Default)]
 pub struct Bm25Index {
     documents: Vec<Bm25Document>,
     document_frequency: HashMap<String, usize>,
     total_length: usize,
+    parameters: Bm25Parameters,
+}
+
+impl Default for Bm25Index {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Bm25Index {
     /// Crea un índice vacío.
     pub fn new() -> Self {
-        Self::default()
+        Self::with_parameters(Bm25Parameters::default())
+    }
+
+    /// Crea un índice con parámetros léxicos explícitos.
+    pub fn with_parameters(parameters: Bm25Parameters) -> Self {
+        let parameters = Bm25Parameters {
+            k1: if parameters.k1.is_finite() {
+                parameters.k1.max(f32::EPSILON)
+            } else {
+                DEFAULT_BM25_K1
+            },
+            b: if parameters.b.is_finite() {
+                parameters.b.clamp(0.0, 1.0)
+            } else {
+                DEFAULT_BM25_B
+            },
+        };
+        Self {
+            documents: Vec::new(),
+            document_frequency: HashMap::new(),
+            total_length: 0,
+            parameters,
+        }
     }
 
     /// Añade un documento.
@@ -69,13 +113,18 @@ impl Bm25Index {
 
     /// Devuelve los `top_k` documentos con mejor puntuación, de mayor a menor.
     pub fn search(&self, query: &str, top_k: usize) -> Vec<(String, f32)> {
-        let terms = tokenize(query);
+        let terms: Vec<String> = tokenize(query)
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
         if terms.is_empty() || self.documents.is_empty() {
             return Vec::new();
         }
 
         let total = self.documents.len() as f32;
         let average = self.average_length().max(f32::EPSILON);
+        let query_length = terms.len() as f32;
         let mut scored = Vec::new();
 
         for document in &self.documents {
@@ -89,12 +138,17 @@ impl Bm25Index {
                 let idf =
                     (1.0 + (total - document_frequency + 0.5) / (document_frequency + 0.5)).ln();
                 let frequency = frequency as f32;
-                let normalization = 1.0 - B + B * (document.length as f32 / average);
-                score += idf * (frequency * (K1 + 1.0)) / (frequency + K1 * normalization);
+                let normalization = 1.0 - self.parameters.b
+                    + self.parameters.b * (document.length as f32 / average);
+                score += idf * (frequency * (self.parameters.k1 + 1.0))
+                    / (frequency + self.parameters.k1 * normalization);
             }
 
             if score > 0.0 {
-                scored.push((document.id.clone(), score));
+                // Normaliza contra la cantidad de términos distintos de la
+                // consulta, no contra el mejor hit: un término ubicuo no debe
+                // convertirse automáticamente en una relevancia de 1.0.
+                scored.push((document.id.clone(), score / (score + query_length)));
             }
         }
 
@@ -124,5 +178,20 @@ mod tests {
         let mut index = Bm25Index::new();
         index.add("doc", "contenido irrelevante");
         assert!(index.search("zzzz", 5).is_empty());
+    }
+
+    #[test]
+    fn normaliza_bm25_sin_forzar_a_uno_el_mejor_hit() {
+        let mut index = Bm25Index::new();
+        index.add("comun-a", "comun comun");
+        index.add("comun-b", "comun");
+        index.add("raro", "extraordinario");
+
+        let common = index.search("comun", 5);
+        let rare = index.search("extraordinario", 5);
+        assert!(common[0].1 < 1.0);
+        assert!(rare[0].1 > common[0].1);
+        assert!(rare[0].1 <= 1.0);
+        assert_eq!(index.search("extraordinario extraordinario", 5), rare);
     }
 }

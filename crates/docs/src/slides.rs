@@ -3,8 +3,8 @@
 //! Un `.pptx` es un ZIP con XML; cada diapositiva vive en `ppt/slides/slideN.xml`
 //! y su texto en elementos `<a:t>` agrupados por párrafos `<a:p>`. Se usa el
 //! marcador de posición de título (`<p:ph type="title"/>`) para poner el título
-//! como encabezado de la sección. El formato legacy `.ppt` necesita LibreOffice y
-//! se aborda en una fase posterior.
+//! como encabezado de la sección. El formato legacy `.ppt` se convierte con
+//! LibreOffice desde el módulo `legacy`.
 
 use std::io::{Cursor, Read};
 
@@ -12,17 +12,20 @@ use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 
 use crate::{
-    validate_zip_size, DocKind, ExtractError, ExtractedDocument, Location, Result, Section,
+    limits, validate_zip_size, DocKind, ExtractError, ExtractedDocument, Location, Result, Section,
 };
 
 /// Extrae las diapositivas de un `.pptx` a partir de sus bytes.
 pub fn extract(bytes: &[u8]) -> Result<ExtractedDocument> {
-    extract_with_limits(bytes, 512 * 1024 * 1024)
+    extract_with_limits(
+        bytes,
+        limits::DEFAULT_MAX_ARCHIVE_MIB * limits::BYTES_PER_MIB,
+    )
 }
 
 /// Extrae un `.pptx`, limitando la expansión total del paquete.
 pub fn extract_with_limits(bytes: &[u8], max_archive_bytes: u64) -> Result<ExtractedDocument> {
-    validate_zip_size(bytes, max_archive_bytes)?;
+    validate_zip_size(bytes, max_archive_bytes, limits::MAX_ARCHIVE_ENTRIES)?;
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(zip_error)?;
     let mut slide_names = slide_file_names(&mut archive);
 

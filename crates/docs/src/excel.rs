@@ -10,21 +10,22 @@ use std::path::Path;
 use calamine::{open_workbook_auto_from_rs, Data, Range, Reader};
 
 use crate::{
-    column_letter, read_bytes_limited, validate_zip_size, DocKind, ExtractError, ExtractedDocument,
-    Location, Result, Section,
+    column_letter, limits, read_bytes_limited, validate_zip_size, DocKind, ExtractError,
+    ExtractedDocument, Location, Result, Section,
 };
-
-/// Número de filas de datos por sección.
-const ROWS_PER_SECTION: usize = 100;
 
 /// Extrae todas las hojas del libro como secciones.
 pub fn extract(path: &Path) -> Result<ExtractedDocument> {
-    let bytes = read_bytes_limited(path, 100 * 1024 * 1024)?;
+    let bytes = read_bytes_limited(path, limits::DEFAULT_MAX_FILE_MIB * limits::BYTES_PER_MIB)?;
     let extension = path
         .extension()
         .and_then(|value| value.to_str())
         .unwrap_or_default();
-    extract_with_limits(&bytes, extension, 512 * 1024 * 1024)
+    extract_with_limits(
+        &bytes,
+        extension,
+        limits::DEFAULT_MAX_ARCHIVE_MIB * limits::BYTES_PER_MIB,
+    )
 }
 
 /// Extrae un libro ya limitado por tamaño, imponiendo además una cota de
@@ -38,7 +39,7 @@ pub fn extract_with_limits(
         extension.to_ascii_lowercase().as_str(),
         "xlsx" | "xlsm" | "xlsb"
     ) {
-        validate_zip_size(bytes, max_archive_bytes)?;
+        validate_zip_size(bytes, max_archive_bytes, limits::MAX_ARCHIVE_ENTRIES)?;
     }
 
     let mut workbook =
@@ -93,7 +94,7 @@ fn sheet_sections(name: &str, range: &Range<Data>) -> Vec<Section> {
         }
         last_row = absolute;
         batch.push(format!("{absolute} | {line}"));
-        if batch.len() >= ROWS_PER_SECTION {
+        if batch.len() >= limits::ROWS_PER_SECTION {
             sections.push(make_section(
                 name, &columns, &header, first_row, last_row, &batch,
             ));
@@ -180,6 +181,70 @@ fn parse_error(error: calamine::Error) -> ExtractError {
 mod tests {
     use super::*;
 
+    fn xlsx_fixture() -> Vec<u8> {
+        let mut archive = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default();
+        for (name, content) in [
+            (
+                "[Content_Types].xml",
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
+</Types>"#,
+            ),
+            (
+                "_rels/.rels",
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"#,
+            ),
+            (
+                "xl/workbook.xml",
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="Ventas" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#,
+            ),
+            (
+                "xl/_rels/workbook.xml.rels",
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
+</Relationships>"#,
+            ),
+            (
+                "xl/sharedStrings.xml",
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="6" uniqueCount="6">
+<si><t>nombre</t></si><si><t>edad</t></si><si><t>Ana</t></si><si><t>Luis</t></si><si><t>30</t></si><si><t>25</t></si>
+</sst>"#,
+            ),
+            (
+                "xl/worksheets/sheet1.xml",
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetData>
+<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>
+<row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2" t="s"><v>4</v></c></row>
+<row r="3"><c r="A3" t="s"><v>3</v></c><c r="B3" t="s"><v>5</v></c></row>
+</sheetData></worksheet>"#,
+            ),
+        ] {
+            archive
+                .start_file(name, options)
+                .expect("abre entrada xlsx");
+            std::io::Write::write_all(&mut archive, content.as_bytes())
+                .expect("escribe entrada xlsx");
+        }
+        archive.finish().expect("cierra xlsx").into_inner()
+    }
+
     #[test]
     fn celdas_vacias_no_aportan_texto() {
         assert_eq!(cell_to_string(&Data::Empty), "");
@@ -206,5 +271,25 @@ mod tests {
     #[test]
     fn un_archivo_inexistente_da_error() {
         assert!(extract(Path::new("/tmp/inexistente.xlsx")).is_err());
+    }
+
+    #[test]
+    fn extrae_un_libro_xlsx_y_conserva_el_rango_de_celdas() {
+        let bytes = xlsx_fixture();
+        let document =
+            extract_with_limits(&bytes, "xlsx", 1024 * 1024).expect("extrae el libro de prueba");
+        assert_eq!(document.sections.len(), 1);
+        assert!(document.sections[0].text.contains("2 | Ana | 30"));
+        assert!(document.sections[0].text.contains("3 | Luis | 25"));
+        assert_eq!(
+            document.sections[0].location,
+            Location::Rows {
+                sheet: Some("Ventas".to_string()),
+                columns: Some("A:B".to_string()),
+                first_row: 2,
+                last_row: 3,
+                prefix_lines: 1,
+            }
+        );
     }
 }
