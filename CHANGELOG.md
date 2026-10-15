@@ -10,6 +10,17 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.2.10] - 2026-10-15
+
+### Cambiado
+
+- Los bloques de código en **modo oscuro** pasan de Monokai clásico a **Monokai
+  Pro** (Sublime Text): fondo `#2D2A2E`, texto `#FCFCFA`, palabras reservadas
+  `#FF6188`, cadenas `#FFD866`, números `#AB9DF2` y comentarios `#727072`. La
+  etiqueta del lenguaje usa el cian `#78DCE8`, el nombre propuesto del bloque el
+  verde `#A9DC76` y los iconos el gris de los comentarios. El modo claro sigue con
+  la paleta Novel.
+
 ## [2.2.9] - 2026-10-15
 
 ### Cambiado

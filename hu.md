@@ -279,7 +279,7 @@ documentos soportados,
 
 **Criterios de aceptación:**
 - Existe un botón "Vista previa" en cada bloque.
-- La vista previa muestra el código con resaltado de sintaxis (Monokai en modo
+- La vista previa muestra el código con resaltado de sintaxis (Monokai Pro en modo
   oscuro).
 - Se muestra el nombre propuesto y la extensión.
 - Se puede copiar al portapapeles.
@@ -387,7 +387,8 @@ documentos soportados,
 - Existe opción en preferencias.
 - El cambio es inmediato, sin reiniciar.
 - La preferencia se guarda entre sesiones.
-- En modo oscuro, los bloques de código usan el resaltado **Monokai** de Sublime
+- En modo oscuro, los bloques de código usan el resaltado **Monokai Pro** de
+  Sublime
   Text; en claro, la paleta Novel.
 
 ---

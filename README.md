@@ -108,7 +108,8 @@ Windows.
 - **Prueba de conexión** por proveedor y **proveedor de respaldo** si el activo
   falla (nunca se cambia sin tu consentimiento).
 - **Tema** claro (**Novel**), oscuro (**Tokyo Night**) o el del sistema; los
-  bloques de código en modo oscuro usan el resaltado **Monokai** de Sublime Text;
+  bloques de código en modo oscuro usan el resaltado **Monokai Pro** de Sublime
+  Text;
   **parámetros del RAG** configurables con avisos para valores extremos.
 - **Directorio de datos** configurable con migración de los datos existentes.
 - **Exportar una sesión** a Markdown (con historial, citas y artefactos).
@@ -291,7 +292,7 @@ raggy/
 │   ├── llm/        # contrato multi-proveedor, streaming SSE y prompt estricto
 │   ├── rag/        # chunking, embeddings, BM25, recuperación híbrida y referencia cruzada
 │   ├── storage/    # SQLite, migraciones versionadas y repositorio
-│   ├── ui/         # interfaz egui/eframe (Novel y Tokyo Night; código en Monokai)
+│   ├── ui/         # interfaz egui/eframe (Novel y Tokyo Night; código en Monokai Pro)
 │   └── app/        # binario `raggy`
 └── .github/        # integración continua y flujo de publicación
 ```

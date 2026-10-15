@@ -15,7 +15,8 @@ A continuación, las tecnologías necesarias para construir este software, todas
 **Temas y resaltado**
 - Tema claro **Novel**, oscuro **Tokyo Night** o el del sistema, con cambio
   inmediato.
-- Los bloques de código en modo oscuro se resaltan con la paleta **Monokai** de
+- Los bloques de código en modo oscuro se resaltan con la paleta **Monokai Pro**
+  de
   Sublime Text (fondo `#272822`); en modo claro se usa la paleta Novel. El
   resaltado es propio (`tokenize_code` + `LayoutJob`), sin dependencias externas.
 

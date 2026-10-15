@@ -116,7 +116,7 @@ Software de escritorio con interfaz gráfica moderna, escrito en Rust, que funci
 
 ### 5.8 Configuración y Preferencias
 - Tema claro/oscuro (los bloques de código en modo oscuro se resaltan con la
-  paleta Monokai de Sublime Text).
+  paleta Monokai Pro de Sublime Text).
 - Idioma de interfaz.
 - Directorio de almacenamiento de datos.
 - Parámetros del RAG (tamaño de chunk, top-K, umbral).

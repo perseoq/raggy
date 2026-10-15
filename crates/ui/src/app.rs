@@ -3918,12 +3918,14 @@ fn render_code_blocks(
             .inner_margin(egui::Margin::symmetric(6, 6))
             .show(ui, |ui| {
                 crate::theme::apply_code_visuals(ui);
-                let tint = ui.visuals().weak_text_color();
+                let tint = crate::theme::code_muted(dark, ui.visuals().weak_text_color());
                 ui.set_width((ui.available_width() * 0.94).max(240.0));
 
                 ui.horizontal(|ui| {
                     if let Some(language) = &block.language {
-                        ui.weak(language.clone());
+                        let lang_color =
+                            crate::theme::code_language(dark, ui.visuals().weak_text_color());
+                        ui.colored_label(lang_color, language.clone());
                         ui.separator();
                     }
 
@@ -3933,11 +3935,17 @@ fn render_code_blocks(
                             .clone()
                             .unwrap_or_else(|| suggest_filename(block.language.as_deref(), index))
                     });
-                    let edit = ui.add(
-                        egui::TextEdit::singleline(&mut name)
-                            .desired_width(190.0)
-                            .frame(egui::Frame::NONE),
-                    );
+                    let name_color = crate::theme::code_filename(dark, ui.visuals().text_color());
+                    let edit = ui
+                        .scope(|ui| {
+                            ui.visuals_mut().override_text_color = Some(name_color);
+                            ui.add(
+                                egui::TextEdit::singleline(&mut name)
+                                    .desired_width(190.0)
+                                    .frame(egui::Frame::NONE),
+                            )
+                        })
+                        .inner;
                     if edit.changed() {
                         pending_edits.push((key.clone(), name.clone()));
                     }
