@@ -72,6 +72,11 @@ pub fn archive() -> egui::ImageSource<'static> {
     egui::include_image!("../assets/icons/archive.svg")
 }
 
+/// Icono de adjuntar un archivo.
+pub fn attach() -> egui::ImageSource<'static> {
+    egui::include_image!("../assets/icons/attach.svg")
+}
+
 /// Botón con un icono y un texto.
 pub fn labelled_button(
     ui: &mut egui::Ui,

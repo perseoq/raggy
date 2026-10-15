@@ -188,6 +188,8 @@ enum CentralAction {
     },
     RetryWithFallback,
     OpenKeys,
+    AttachFiles,
+    RemoveAttachment(String),
     CopyCode(String),
     DownloadBlock {
         message_id: String,
@@ -221,6 +223,7 @@ pub struct RaggyApp {
     search_note: Option<String>,
     sessions: Vec<Session>,
     active_session: Option<Session>,
+    attachments: Vec<Document>,
     messages: Vec<Message>,
     rendered: HashMap<String, RenderedMessage>,
     chat_input: String,
@@ -290,6 +293,7 @@ impl RaggyApp {
             search_note: None,
             sessions: Vec::new(),
             active_session: None,
+            attachments: Vec::new(),
             messages: Vec::new(),
             rendered: HashMap::new(),
             chat_input: String::new(),
@@ -681,6 +685,7 @@ impl RaggyApp {
                 self.selected_folder = Some(session.folder_id.clone());
                 self.messages = storage.list_messages(&id).unwrap_or_default();
                 self.artifacts = storage.list_artifacts_by_session(&id).unwrap_or_default();
+                self.attachments = storage.list_session_documents(&id).unwrap_or_default();
                 self.refresh_rendered();
                 self.active_session = Some(session);
                 self.chat_input.clear();
@@ -721,14 +726,111 @@ impl RaggyApp {
             self.status = format!("No se pudo eliminar la sesión: {error}");
             return;
         }
+        // Los índices de los adjuntos se borran en cascada con la sesión; los
+        // archivos almacenados se retiran aquí.
+        let _ = std::fs::remove_dir_all(self.paths.attachments_dir().join(id));
+        self.search_cache.invalidate_session(id);
         if self.active_session.as_ref().is_some_and(|s| s.id == id) {
             self.active_session = None;
             self.messages.clear();
             self.rendered.clear();
+            self.attachments.clear();
             self.streaming = None;
         }
         self.reload_sessions();
         self.status = "Sesión eliminada.".to_string();
+    }
+
+    /// Relee los adjuntos de la sesión activa.
+    fn reload_attachments(&mut self, session_id: &str) {
+        self.attachments.clear();
+        let Some(storage) = &self.storage else {
+            return;
+        };
+        match storage.list_session_documents(session_id) {
+            Ok(documents) => self.attachments = documents,
+            Err(error) => self.status = format!("No se pudieron listar los adjuntos: {error}"),
+        }
+    }
+
+    /// Pide archivos y los adjunta al chat activo (HU-34).
+    fn attach_files(&mut self) {
+        let Some(session) = self.active_session.clone() else {
+            self.status = "Abre un chat antes de adjuntar archivos.".to_string();
+            return;
+        };
+
+        let extensions = raggy_core::indexable_extensions();
+        let Some(files) = rfd::FileDialog::new()
+            .set_title("Adjunta archivos al chat")
+            .add_filter("Documentos y código", &extensions)
+            .pick_files()
+        else {
+            return;
+        };
+
+        let directory = self.paths.attachments_dir().join(&session.id);
+        let options = self.index_options();
+        let summary = {
+            let Some(storage) = self.storage.as_mut() else {
+                return;
+            };
+            match raggy_core::attach_files(storage, &session.id, &directory, &files, &options) {
+                Ok(summary) => summary,
+                Err(error) => {
+                    self.status = format!("No se pudieron adjuntar los archivos: {error}");
+                    return;
+                }
+            }
+        };
+
+        if summary.is_empty() {
+            self.status = match summary.skipped.first() {
+                Some(skip) => format!(
+                    "No se adjuntó nada: {} {}",
+                    skip.path.display(),
+                    skip.reason
+                ),
+                None => "No se adjuntó ningún archivo.".to_string(),
+            };
+        } else {
+            self.status = format!("{} adjunto(s) al chat; indexando…", summary.attached.len());
+            if !summary.replaced.is_empty() {
+                self.status.push_str(&format!(
+                    " {} reemplazó/reemplazaron un adjunto con el mismo contenido.",
+                    summary.replaced.len()
+                ));
+            }
+            if !summary.skipped.is_empty() {
+                self.status
+                    .push_str(&format!(" {} omitido(s).", summary.skipped.len()));
+            }
+        }
+
+        self.search_cache.invalidate_session(&session.id);
+        self.reload_attachments(&session.id);
+    }
+
+    /// Quita un adjunto del chat activo (HU-34).
+    fn remove_attachment(&mut self, relative_path: &str) {
+        let Some(session) = self.active_session.clone() else {
+            return;
+        };
+        let directory = self.paths.attachments_dir().join(&session.id);
+        let result = {
+            let Some(storage) = self.storage.as_mut() else {
+                return;
+            };
+            raggy_core::remove_attachment(storage, &session.id, &directory, relative_path)
+                .map_err(|error| error.to_string())
+        };
+        if let Err(error) = result {
+            self.status = format!("No se pudo quitar el adjunto: {error}");
+            return;
+        }
+        self.search_cache.invalidate_session(&session.id);
+        self.reload_attachments(&session.id);
+        self.status = format!("Adjunto «{relative_path}» quitado.");
     }
 
     fn update_session_model(&mut self, provider: ProviderId, model: String) {
@@ -847,14 +949,16 @@ impl RaggyApp {
         };
         let provider = ProviderId::from_key(&session.provider).unwrap_or(ProviderId::DeepSeek);
 
-        // El contexto se recupera solo de la carpeta de la sesión (HU-06).
+        // El contexto se recupera de la carpeta de la sesión y de sus adjuntos
+        // (HU-06, HU-34); nunca de otras sesiones.
         let options = self.retriever_options();
         let dimensions = self.config.rag.embedding_dimensions;
         let (blocks, citations) = match &self.storage {
             Some(storage) => {
-                match self.search_cache.search_folder(
+                match self.search_cache.search_chat(
                     storage,
                     &session.folder_id,
+                    &session.id,
                     &prompt,
                     &options,
                     dimensions,
@@ -2096,11 +2200,49 @@ impl RaggyApp {
                     if ui.button("Artefactos").clicked() {
                         self.artifacts_open = true;
                     }
+                    if crate::icons::labelled_button(
+                        ui,
+                        crate::icons::attach(),
+                        "Adjuntar",
+                        ui.visuals().weak_text_color(),
+                    )
+                    .on_hover_text(
+                        "Adjunta archivos a este chat para buscarlos junto con la carpeta",
+                    )
+                    .clicked()
+                    {
+                        actions.push(CentralAction::AttachFiles);
+                    }
                 });
             });
         });
         ui.add_space(6.0);
         ui.separator();
+
+        // --- adjuntos del chat (HU-34) ---
+        if !self.attachments.is_empty() {
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.small("Adjuntos:");
+                for document in &self.attachments {
+                    let label = format!(
+                        "{} ({})",
+                        document.relative_path,
+                        human_size(document.size_bytes)
+                    );
+                    if ui
+                        .button(format!("{label}  ✕"))
+                        .on_hover_text("Quitar este adjunto del chat")
+                        .clicked()
+                    {
+                        actions.push(CentralAction::RemoveAttachment(
+                            document.relative_path.clone(),
+                        ));
+                    }
+                }
+            });
+            ui.add_space(4.0);
+        }
 
         // --- compositor fijo en la parte inferior ---
         let mut input = std::mem::take(&mut self.chat_input);
@@ -3456,6 +3598,10 @@ impl RaggyApp {
                     self.refresh_keys();
                     self.keys_open = true;
                 }
+                CentralAction::AttachFiles => self.attach_files(),
+                CentralAction::RemoveAttachment(relative_path) => {
+                    self.remove_attachment(&relative_path);
+                }
                 CentralAction::CopyCode(text) => {
                     ui.ctx().copy_text(text);
                     self.status = "Código copiado al portapapeles.".to_string();
@@ -3570,6 +3716,19 @@ fn short_timestamp(value: &str) -> String {
         .get(..16)
         .map(|slice| slice.replace('T', " "))
         .unwrap_or_else(|| value.to_string())
+}
+
+/// Tamaño legible de un archivo adjunto (bytes, KB o MB).
+fn human_size(bytes: i64) -> String {
+    const KIB: f64 = 1024.0;
+    let bytes = bytes.max(0) as f64;
+    if bytes < KIB {
+        format!("{bytes:.0} B")
+    } else if bytes < KIB * KIB {
+        format!("{:.0} KB", bytes / KIB)
+    } else {
+        format!("{:.1} MB", bytes / (KIB * KIB))
+    }
 }
 
 /// Extrae la primera línea con contenido de un fragmento, recortada.
@@ -4123,7 +4282,7 @@ fn push_plain(tokens: &mut Vec<Token>, plain: &mut String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{short_timestamp, snippet, tokenize_code, TokenKind};
+    use super::{human_size, short_timestamp, snippet, tokenize_code, TokenKind};
 
     #[test]
     fn abrevia_marcas_de_tiempo() {
@@ -4132,6 +4291,14 @@ mod tests {
             "2026-10-14 02:15"
         );
         assert_eq!(short_timestamp("corto"), "corto");
+    }
+
+    #[test]
+    fn expresa_el_tamano_de_un_adjunto() {
+        assert_eq!(human_size(0), "0 B");
+        assert_eq!(human_size(512), "512 B");
+        assert_eq!(human_size(2048), "2 KB");
+        assert_eq!(human_size(3 * 1024 * 1024), "3.0 MB");
     }
 
     #[test]

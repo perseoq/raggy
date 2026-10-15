@@ -74,6 +74,11 @@ impl AppPaths {
         self.data_dir.join("uploads")
     }
 
+    /// Directorio de archivos adjuntos a los chats, con una subcarpeta por sesión.
+    pub fn attachments_dir(&self) -> PathBuf {
+        self.data_dir.join("attachments")
+    }
+
     /// Directorio de registros (logs).
     pub fn logs_dir(&self) -> PathBuf {
         self.data_dir.join("logs")
@@ -87,6 +92,7 @@ impl AppPaths {
             self.indexes_dir(),
             self.artifacts_dir(),
             self.uploads_dir(),
+            self.attachments_dir(),
             self.logs_dir(),
         ] {
             std::fs::create_dir_all(&dir).map_err(|source| CoreError::Io { path: dir, source })?;
@@ -155,6 +161,7 @@ pub fn migrate_data(
         (from.indexes_dir(), to.indexes_dir()),
         (from.artifacts_dir(), to.artifacts_dir()),
         (from.uploads_dir(), to.uploads_dir()),
+        (from.attachments_dir(), to.attachments_dir()),
         (from.logs_dir(), to.logs_dir()),
     ] {
         copy_tree(&source, &destination, &mut copied)?;

@@ -146,7 +146,7 @@ fn scan_indexable_files_checked(root: &Path) -> (Vec<PathBuf>, bool, Vec<String>
 /// cambiar el contenido extraído o los embeddings. Al instalar Tesseract,
 /// Poppler o LibreOffice después de una indexación fallida, la huella cambia y
 /// el siguiente reindexado vuelve a procesar esos archivos.
-fn processing_fingerprint(options: &IndexOptions) -> String {
+pub fn processing_fingerprint(options: &IndexOptions) -> String {
     let mut tools = Tools::detect_with_timeout(options.extract.process_timeout_secs);
     tools.languages.sort();
     let path_label = |path: &Option<PathBuf>| {
@@ -241,7 +241,6 @@ pub fn index_folder(
         .collect();
 
     let chunker = MarkdownChunker::new();
-    let embedder = HashingEmbedding::new(options.embedding_dimensions);
     let mut summary = IndexSummary {
         folder_id: folder_id.to_string(),
         files_total: total,
@@ -308,10 +307,7 @@ pub fn index_folder(
 
         // El encabezado se incluye en el embedding para que una consulta que
         // mencione el título del documento se acerque más a sus fragmentos.
-        let embeddings: Vec<Vec<f32>> = chunks
-            .iter()
-            .map(|chunk| embedder.embed(&embedding_text(chunk)).vector)
-            .collect();
+        let embeddings = embed_chunks(&chunks, options.embedding_dimensions);
 
         let document = Document::new(
             folder_id,
@@ -359,7 +355,7 @@ pub fn index_folder(
 
 /// Lee como máximo `max_bytes + 1` bytes, para aplicar el límite a todos los
 /// formatos, incluidos Markdown, texto y código que usan su propio chunker.
-fn read_file_limited(path: &Path, max_bytes: u64) -> std::io::Result<Vec<u8>> {
+pub(crate) fn read_file_limited(path: &Path, max_bytes: u64) -> std::io::Result<Vec<u8>> {
     let file = std::fs::File::open(path)?;
     let mut bytes = Vec::new();
     file.take(max_bytes.saturating_add(1))
@@ -380,6 +376,31 @@ fn embedding_text(chunk: &Chunk) -> String {
         Some(heading) => format!("{heading}\n{}", chunk.content),
         None => chunk.content.clone(),
     }
+}
+
+/// Calcula los embeddings locales de una lista de fragmentos.
+///
+/// Se comparte entre la indexación de carpetas y los adjuntos al chat para que
+/// ambos usen el mismo texto vectorizado (encabezado + contenido).
+pub fn embed_chunks(chunks: &[Chunk], dimensions: usize) -> Vec<Vec<f32>> {
+    let embedder = HashingEmbedding::new(dimensions);
+    chunks
+        .iter()
+        .map(|chunk| embedder.embed(&embedding_text(chunk)).vector)
+        .collect()
+}
+
+/// Extrae y trocea un archivo ya leído, con los avisos no fatales.
+///
+/// Lo usan tanto la indexación de carpetas como los archivos adjuntos a un chat.
+pub fn chunk_file(
+    path: &Path,
+    relative: &str,
+    bytes: &[u8],
+    options: &IndexOptions,
+) -> Result<(Vec<Chunk>, Vec<String>)> {
+    let chunker = MarkdownChunker::new();
+    extract_chunks(path, relative, bytes, &chunker, options)
 }
 
 /// ¿El archivo se trocea con el chunker de Markdown (encabezados y bloques de

@@ -36,6 +36,13 @@ pub enum CoreError {
     #[error("no se pudo guardar el artefacto: {0}")]
     Artifact(String),
 
+    /// Nombre de adjunto no válido (intenta salir de su carpeta).
+    #[error("nombre de adjunto no válido: `{name}`")]
+    InvalidAttachmentName {
+        /// Nombre recibido.
+        name: String,
+    },
+
     /// Error procedente de la capa de persistencia.
     #[error(transparent)]
     Storage(#[from] raggy_storage::StorageError),

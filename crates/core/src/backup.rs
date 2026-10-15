@@ -93,7 +93,18 @@ pub fn export_backup(
         payloads.push(payload);
     }
 
-    collect_uploads(&paths.uploads_dir(), &mut payloads, &mut total_size)?;
+    collect_tree(
+        &paths.uploads_dir(),
+        "uploads",
+        &mut payloads,
+        &mut total_size,
+    )?;
+    collect_tree(
+        &paths.attachments_dir(),
+        "attachments",
+        &mut payloads,
+        &mut total_size,
+    )?;
     collect_artifacts(storage, temporary.path(), &mut payloads, &mut total_size)?;
     if payloads.len() > MAX_BACKUP_ENTRIES {
         return Err(CoreError::Artifact(format!(
@@ -234,8 +245,9 @@ fn private_tempdir_in(parent: &Path) -> std::io::Result<tempfile::TempDir> {
     builder.tempdir_in(parent)
 }
 
-fn collect_uploads(
+fn collect_tree(
     root: &Path,
+    prefix: &str,
     payloads: &mut Vec<PayloadFile>,
     total_size: &mut u64,
 ) -> Result<()> {
@@ -250,9 +262,9 @@ fn collect_uploads(
         }
     };
     if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
-        return Err(CoreError::Artifact(
-            "la carpeta gestionada de subidas no es un directorio seguro".to_string(),
-        ));
+        return Err(CoreError::Artifact(format!(
+            "la carpeta gestionada «{prefix}» no es un directorio seguro"
+        )));
     }
     for entry in WalkDir::new(root).follow_links(false) {
         let entry = entry?;
@@ -267,15 +279,15 @@ fn collect_uploads(
             .components()
             .map(|component| match component {
                 Component::Normal(name) => name.to_str().ok_or_else(|| {
-                    CoreError::Artifact("el nombre de una subida no es UTF-8".to_string())
+                    CoreError::Artifact("el nombre de un archivo no es UTF-8".to_string())
                 }),
-                _ => Err(CoreError::Artifact(
-                    "ruta no normalizada dentro de uploads".to_string(),
-                )),
+                _ => Err(CoreError::Artifact(format!(
+                    "ruta no normalizada dentro de {prefix}"
+                ))),
             })
             .collect::<Result<Vec<_>>>()?
             .join("/");
-        let name = format!("uploads/{relative}");
+        let name = format!("{prefix}/{relative}");
         if payloads.iter().any(|payload| payload.name == name) {
             return Err(CoreError::Artifact(format!(
                 "hay más de un archivo con la ruta de respaldo «{name}»"
@@ -731,7 +743,7 @@ fn is_safe_archive_name(name: &str) -> bool {
     if matches!(name, "raggy.sqlite3" | "settings.json") {
         return true;
     }
-    ["uploads/", "artifacts/"]
+    ["uploads/", "artifacts/", "attachments/"]
         .iter()
         .find_map(|prefix| name.strip_prefix(prefix))
         .is_some_and(is_safe_relative)
@@ -757,12 +769,17 @@ fn is_safe_relative(name: &str) -> bool {
 fn restore_managed_paths(storage: &raggy_storage::Storage, data_dir: &Path) -> Result<()> {
     let uploads_dir = data_dir.join("uploads");
     let artifacts_dir = data_dir.join("artifacts");
+    let attachments_dir = data_dir.join("attachments");
     fs::create_dir_all(&uploads_dir).map_err(|source| CoreError::Io {
         path: uploads_dir.clone(),
         source,
     })?;
     fs::create_dir_all(&artifacts_dir).map_err(|source| CoreError::Io {
         path: artifacts_dir.clone(),
+        source,
+    })?;
+    fs::create_dir_all(&attachments_dir).map_err(|source| CoreError::Io {
+        path: attachments_dir.clone(),
         source,
     })?;
 
@@ -895,6 +912,25 @@ mod tests {
 
         let session = Session::new("f1", "deepseek", "deepseek-chat");
         storage.upsert_session(&session).expect("guarda sesión");
+
+        let attachment_dir = source_paths.attachments_dir().join(&session.id);
+        fs::create_dir_all(&attachment_dir).expect("crea la carpeta de adjuntos");
+        fs::write(
+            attachment_dir.join("informe.md"),
+            "# Informe\n\ncontenido adjunto\n",
+        )
+        .expect("crea el archivo adjunto");
+        storage
+            .connection()
+            .execute(
+                "INSERT INTO documents
+                     (id, session_id, relative_path, content_hash, processing_hash, size_bytes,
+                      modified_at, indexed_at, chunk_count)
+                 VALUES ('d1', ?1, 'informe.md', 'h', 'p', 26, 0, '2026-01-01T00:00:00Z', 1)",
+                [&session.id],
+            )
+            .expect("registra el adjunto");
+
         let artifact_path = source.join("salida/saludo.py");
         fs::create_dir_all(artifact_path.parent().expect("carpeta del artefacto"))
             .expect("crea carpeta del artefacto");
@@ -913,7 +949,10 @@ mod tests {
 
         let archive = source.join("respaldo.zip");
         let summary = export_backup(&storage, &source_paths, &archive).expect("exporta");
-        assert_eq!(summary.files, 4, "db, settings, subida y artefacto físico");
+        assert_eq!(
+            summary.files, 5,
+            "db, settings, subida, adjunto y artefacto físico"
+        );
         assert!(archive.is_file());
         drop(storage);
 
@@ -935,6 +974,12 @@ mod tests {
                 .expect("nombre de entrada válido")
                 .starts_with("artifacts/")),
             "el respaldo debe incluir los archivos físicos de artefactos"
+        );
+        assert!(
+            zip.file_names().any(|name| name
+                .expect("nombre de entrada válido")
+                .starts_with("attachments/")),
+            "el respaldo debe incluir los archivos adjuntos a los chats"
         );
 
         let target = temp_dir("destino");
@@ -965,6 +1010,14 @@ mod tests {
             .expect("import devuelve la carpeta restaurada");
         let restored_paths = AppPaths::with_data_dir(&target, restored_data_dir);
         assert!(restored_paths.uploads_dir().join("ventas.csv").is_file());
+        assert!(
+            restored_paths
+                .attachments_dir()
+                .join(&session.id)
+                .join("informe.md")
+                .is_file(),
+            "el adjunto del chat se restaura en su carpeta"
+        );
         let restored_config = AppConfig::load(&target_paths.settings_path()).expect("lee config");
         assert_eq!(restored_config.theme, crate::Theme::Dark);
         assert_eq!(
@@ -1045,7 +1098,9 @@ mod tests {
         assert!(is_safe_archive_name("settings.json"));
         assert!(is_safe_archive_name("uploads/sub/ventas.csv"));
         assert!(is_safe_archive_name("artifacts/sesion/id/src/main.rs"));
+        assert!(is_safe_archive_name("attachments/sesion/informe.pdf"));
         assert!(!is_safe_archive_name("../../afuera"));
+        assert!(!is_safe_archive_name("attachments/../afuera"));
         assert!(!is_safe_archive_name("uploads/../../afuera"));
         assert!(!is_safe_archive_name("uploads/C:/Windows/file"));
         assert!(!is_safe_archive_name("artifacts/id/../../afuera"));

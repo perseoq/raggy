@@ -39,6 +39,11 @@ Windows.
   a una carpeta gestionada («Archivos subidos») que se indexa como una más, sin
   tocar los originales. Si un archivo ya existe con el mismo nombre, se reemplaza
   y la interfaz lo avisa en lugar de hacerlo en silencio.
+- Botón **Adjuntar** en el chat para añadir uno o varios archivos a la
+  conversación actual: su contenido se indexa bajo esa sesión y se busca junto
+  con la carpeta, de modo que puedes contrastar o comparar ambas fuentes. Los
+  adjuntos se listan sobre la conversación y se pueden quitar uno a uno; nunca se
+  filtran a otros chats. Límites: 50 MB por archivo y 200 MB por sesión.
 - **Chunking semántico**: respeta encabezados, listas y bloques de código (un
   bloque nunca se parte) y guarda archivo, ruta, encabezado padre y ubicación
   nativa del formato.
@@ -182,6 +187,7 @@ Todo vive en la **carpeta base** `~/.raggydesktop/`:
 ├── settings.json     # configuración y claves de API
 ├── raggy.sqlite3     # base de datos (índices, sesiones, mensajes, artefactos)
 ├── uploads/          # archivos subidos a la carpeta gestionada
+├── attachments/      # archivos adjuntos a cada chat (una subcarpeta por sesión)
 ├── artifacts/        # archivos generados registrados (se reconstruyen al restaurar)
 ├── indexes/          # reservado; los vectores viven en SQLite
 └── logs/             # registros con rotación diaria

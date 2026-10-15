@@ -5,6 +5,7 @@
 //! No depende de la interfaz gráfica ni de ningún proveedor de LLM.
 
 pub mod artifacts;
+pub mod attachments;
 pub mod backup;
 pub mod chat;
 pub mod config;
@@ -22,6 +23,10 @@ pub use artifacts::{
     artifacts_for_prompt, free_path, relative_to, sanitize_relative, save_artifact, ConflictPolicy,
     SaveOutcome,
 };
+pub use attachments::{
+    attach_files, attachment_path, clear_attachments, remove_attachment, AttachmentSkip,
+    AttachmentSummary, MAX_ATTACHMENT_BYTES, MAX_SESSION_ATTACHMENT_BYTES,
+};
 pub use backup::{export_backup, import_backup, BackupSummary};
 pub use chat::{
     compose_request, context_from_retrieved, ChatCommand, ChatEvent, ChatWorker, ProviderFactory,
@@ -34,9 +39,9 @@ pub use config::{
 pub use error::{CoreError, Result};
 pub use export::{session_markdown, write_session_export};
 pub use index::{
-    index_folder, indexable_extensions, is_indexable, scan_indexable_files, IndexCommand,
-    IndexEvent, IndexOptions, IndexPhase, IndexProgress, IndexSummary, IndexWorker,
-    MARKDOWN_EXTENSIONS,
+    chunk_file, embed_chunks, index_folder, indexable_extensions, is_indexable,
+    processing_fingerprint, scan_indexable_files, IndexCommand, IndexEvent, IndexOptions,
+    IndexPhase, IndexProgress, IndexSummary, IndexWorker, MARKDOWN_EXTENSIONS,
 };
 pub use ingest::tools_report;
 pub use paths::{

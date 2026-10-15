@@ -16,7 +16,7 @@ use raggy_llm::{
     build_system_prompt, ArtifactContext, ChatDelta, ChatMessage, ChatRequest, ContextBlock,
     LlmProvider, ProviderError, ProviderId,
 };
-use raggy_rag::{verify_citations, Citation, RetrievedChunk};
+use raggy_rag::{verify_citations, ChunkOrigin, Citation, RetrievedChunk};
 use raggy_storage::{Message, Storage};
 
 use crate::error::{CoreError, Result};
@@ -29,10 +29,23 @@ pub type ProviderFactory = Arc<
 >;
 
 /// Convierte los fragmentos recuperados en bloques de contexto y citas.
+///
+/// El origen (carpeta o adjunto) se anota **dentro del texto** del bloque, no en
+/// la etiqueta, para que la etiqueta siga coincidiendo con la cita y esta pueda
+/// verificarse (HU-11).
 pub fn context_from_retrieved(chunks: &[RetrievedChunk]) -> (Vec<ContextBlock>, Vec<Citation>) {
     let blocks = chunks
         .iter()
-        .map(|chunk| ContextBlock::new(chunk.citation().label(), chunk.chunk.content.clone()))
+        .map(|chunk| {
+            let text = match &chunk.origin {
+                ChunkOrigin::Folder => chunk.chunk.content.clone(),
+                ChunkOrigin::Attachment(name) => format!(
+                    "(Archivo adjunto a este chat: {name})\n{}",
+                    chunk.chunk.content
+                ),
+            };
+            ContextBlock::new(chunk.citation().label(), text)
+        })
         .collect();
     let citations = chunks.iter().map(RetrievedChunk::citation).collect();
     (blocks, citations)
@@ -366,5 +379,54 @@ mod tests {
             "historial enviado: {enviados}"
         );
         assert!(request.messages.len() >= 2);
+    }
+
+    #[test]
+    fn el_contexto_anota_el_origen_sin_tocar_la_etiqueta_de_la_cita() {
+        fn fragmento(id: &str, name: &str, content: &str) -> raggy_rag::Chunk {
+            raggy_rag::Chunk {
+                id: id.to_string(),
+                content_hash: id.to_string(),
+                content: content.to_string(),
+                metadata: raggy_rag::ChunkMetadata {
+                    source_file: name.to_string(),
+                    source_path: name.to_string(),
+                    heading: None,
+                    location: None,
+                    start_line: 1,
+                    end_line: 2,
+                },
+            }
+        }
+
+        let folder = RetrievedChunk {
+            chunk: fragmento("carpeta", "guia.md", "contenido de la carpeta"),
+            origin: ChunkOrigin::Folder,
+            score: 0.9,
+            vector_score: 0.9,
+            lexical_score: 0.9,
+        };
+        let attachment = RetrievedChunk {
+            chunk: fragmento("adjunto", "informe.pdf", "contenido del adjunto"),
+            origin: ChunkOrigin::Attachment("informe.pdf".to_string()),
+            score: 0.8,
+            vector_score: 0.8,
+            lexical_score: 0.8,
+        };
+
+        let (blocks, citations) = context_from_retrieved(&[folder, attachment]);
+
+        assert_eq!(blocks[0].citation, "guia.md (líneas 1-2)");
+        assert_eq!(blocks[0].text, "contenido de la carpeta");
+
+        assert_eq!(blocks[1].citation, "informe.pdf (líneas 1-2)");
+        assert!(blocks[1]
+            .text
+            .contains("Archivo adjunto a este chat: informe.pdf"));
+        assert!(blocks[1].text.contains("contenido del adjunto"));
+
+        // La etiqueta de la cita no se altera: sigue siendo verificable.
+        assert_eq!(citations[1].label(), "informe.pdf (líneas 1-2)");
+        assert!(citations[1].is_verified_in("El dato está en [informe.pdf (líneas 1-2)]."));
     }
 }

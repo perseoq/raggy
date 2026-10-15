@@ -10,22 +10,34 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.2.5] - 2026-10-15
+
 ### Añadido
 
-- **Fase 5a de 5b — archivos adjuntos al chat (infraestructura)**: los fragmentos
-  y documentos pueden pertenecer a la carpeta de un chat o a la propia sesión
-  (archivos adjuntos), nunca a ambos. La migración de esquema 9 añade
-  `session_id`, la restricción de propietario único y el borrado en cascada.
-- El recuperador de chat fusiona los fragmentos de la carpeta con los de los
-  adjuntos de la sesión y conserva el origen de cada uno (`carpeta` o
-  `adjunto: <nombre>`), con las sesiones aisladas entre sí (HU-06, HU-34).
-- La caché de búsqueda se renueva al adjuntar o quitar archivos de una sesión, y
-  hay un método para borrar todos los adjuntos de una sesión.
+- **Adjuntar archivos al chat (HU-34)**: botón «Adjuntar» junto a «Artefactos»
+  para añadir uno o varios archivos a la conversación actual. Su contenido se
+  extrae, se trocea y se indexa bajo la sesión, de modo que la respuesta combina
+  el índice de la carpeta con el de los adjuntos y permite compararlos.
+- Los adjuntos se muestran como etiquetas sobre la conversación, con su tamaño y
+  un botón para quitarlos.
+- El contexto indica el origen de cada fragmento (carpeta del chat o archivo
+  adjunto) sin alterar la etiqueta de la cita.
+- Límites de seguridad: 50 MB por adjunto y 200 MB por sesión; los archivos no
+  indexables, vacíos o ilegibles se omiten indicando el motivo.
+- Los adjuntos viven en `attachments/<sesión>/` y se incluyen en el respaldo y la
+  restauración (HU-32).
+- Migración de esquema 9: los fragmentos y documentos pueden pertenecer a una
+  carpeta o a una sesión (nunca a ambas), con propietario único y borrado en
+  cascada.
 
 ### Cambiado
 
+- El chat recupera contexto con `search_chat` (carpeta + adjuntos de la sesión) y
+  renueva su caché al adjuntar o quitar archivos, sin mezclar sesiones (HU-06).
 - `Document` distingue `folder_id` y `session_id`, y el repositorio escribe
   documentos y fragmentos mediante un `IndexOwner` (carpeta o sesión).
+- Eliminar una sesión retira también sus adjuntos, sus índices y los archivos
+  almacenados.
 
 ## [2.2.4] - 2026-10-15
 
