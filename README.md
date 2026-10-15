@@ -43,7 +43,9 @@ Windows.
   conversación actual: su contenido se indexa bajo esa sesión y se busca junto
   con la carpeta, de modo que puedes contrastar o comparar ambas fuentes. Los
   adjuntos se listan sobre la conversación y se pueden quitar uno a uno; nunca se
-  filtran a otros chats. Límites: 50 MB por archivo y 200 MB por sesión.
+  filtran a otros chats. Límites: 50 MB por archivo y 200 MB por sesión. Si un
+  adjunto menciona un folio o clave (p. ej. el que referencia `ventas.csv`), se
+  busca también ese registro en la carpeta.
 - **Chunking semántico**: respeta encabezados, listas y bloques de código (un
   bloque nunca se parte) y guarda archivo, ruta, encabezado padre y ubicación
   nativa del formato.

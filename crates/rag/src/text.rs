@@ -51,6 +51,45 @@ fn fold(character: char) -> char {
     }
 }
 
+/// Extrae identificadores y referencias (códigos con letras y dígitos) de un
+/// texto: p. ej. `V-2024-00953`, `C-2025-01819` o un RFC.
+///
+/// Se usan para buscar en la carpeta los registros que un archivo adjunto
+/// referencia por su folio o clave (HU-34).
+pub fn lookup_terms(text: &str) -> Vec<String> {
+    let mut terms = Vec::new();
+    let mut current = String::new();
+
+    for character in text.chars() {
+        if character.is_alphanumeric() || matches!(character, '-' | '_' | '/' | '.') {
+            current.push(character);
+        } else {
+            push_lookup(&mut terms, &mut current);
+        }
+    }
+    push_lookup(&mut terms, &mut current);
+
+    terms
+}
+
+/// Añade la candidata si parece una referencia (letras y varios dígitos).
+fn push_lookup(terms: &mut Vec<String>, current: &mut String) {
+    let candidate = std::mem::take(current);
+    let candidate = candidate.trim_matches(|character| matches!(character, '-' | '_' | '/' | '.'));
+    let digits = candidate.chars().filter(char::is_ascii_digit).count();
+    let letters = candidate
+        .chars()
+        .filter(|character| character.is_alphabetic())
+        .count();
+    // Se exigen letras y al menos dos dígitos: descarta años, fechas e importes.
+    if candidate.chars().count() >= 5 && digits >= 2 && letters >= 1 {
+        let normalized = candidate.to_lowercase();
+        if !terms.contains(&normalized) {
+            terms.push(normalized);
+        }
+    }
+}
+
 /// Hash FNV-1a de 64 bits, estable entre ejecuciones y plataformas.
 pub fn fnv1a(value: &str) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
@@ -83,5 +122,21 @@ mod tests {
     fn el_hash_es_estable() {
         assert_eq!(fnv1a("raggy"), fnv1a("raggy"));
         assert_ne!(fnv1a("raggy"), fnv1a("raggx"));
+    }
+
+    #[test]
+    fn extrae_referencias_y_descarta_fechas_e_importes() {
+        let reference = "Referencia ventas.csv: V-2024-00953, RFC VUX170518WQG, \
+                         folio FC-2025-003, fecha 2025-01-01, total 1160.00";
+        assert_eq!(
+            lookup_terms(reference),
+            vec![
+                "v-2024-00953".to_string(),
+                "vux170518wqg".to_string(),
+                "fc-2025-003".to_string()
+            ]
+        );
+        assert!(lookup_terms("solo texto sin códigos").is_empty());
+        assert!(lookup_terms("2025-01-01").is_empty());
     }
 }

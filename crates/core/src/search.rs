@@ -17,6 +17,15 @@ use crate::error::Result;
 /// Número máximo de recuperadores en caché antes de vaciarla por completo.
 const MAX_CACHED_RETRIEVERS: usize = 8;
 
+/// Máximo de identificadores de un adjunto que se buscan en la carpeta.
+const MAX_LOOKUP_TERMS: usize = 12;
+
+/// Máximo de fragmentos de la carpeta añadidos por referencia cruzada.
+const MAX_LOOKUP_RESULTS: usize = 3;
+
+/// Fragmentos adjuntos que se inspeccionan para extraer referencias.
+const MAX_LOOKUP_SOURCES: usize = 2;
+
 struct CachedRetriever {
     revision: String,
     retriever: HybridRetriever,
@@ -52,6 +61,11 @@ impl SearchCache {
     ///
     /// Los fragmentos de cada origen se etiquetan para poder comparar la
     /// información de la carpeta con la de los archivos adjuntos al chat.
+    ///
+    /// Además, si los adjuntos mencionan identificadores (el folio de una factura
+    /// que referencia una fila de un CSV, por ejemplo), se buscan también en la
+    /// carpeta: la pregunta no suele incluir ese código, así que sin este paso la
+    /// fila correspondiente no aparecería.
     pub fn search_chat(
         &mut self,
         storage: &Storage,
@@ -61,14 +75,31 @@ impl SearchCache {
         options: &RetrieverOptions,
         embedding_dimensions: usize,
     ) -> Result<Vec<RetrievedChunk>> {
-        self.search(
+        let base = self.search(
             storage,
             folder_id,
             Some(session_id),
             query,
             options,
             embedding_dimensions,
-        )
+        )?;
+
+        let terms = lookup_terms_from(&base);
+        if terms.is_empty() {
+            return Ok(base);
+        }
+
+        let lookup = format!("{query} {}", terms.join(" "));
+        let linked = self.search(
+            storage,
+            folder_id,
+            Some(session_id),
+            &lookup,
+            options,
+            embedding_dimensions,
+        )?;
+
+        Ok(merge_linked(base, linked, &terms, options.top_k))
     }
 
     fn search(
@@ -245,10 +276,76 @@ pub fn embedding_coverage(
     Ok(EmbeddingCoverage { chunks, embedded })
 }
 
+/// Identificadores que mencionan los fragmentos adjuntos de una consulta.
+///
+/// Solo se miran los mejores adjuntos: son los que el usuario acaba de subir y
+/// los que pueden referenciar registros de la carpeta.
+fn lookup_terms_from(results: &[RetrievedChunk]) -> Vec<String> {
+    let mut terms: Vec<String> = Vec::new();
+    for result in results
+        .iter()
+        .filter(|result| result.origin.is_attachment())
+        .take(MAX_LOOKUP_SOURCES)
+    {
+        for term in raggy_rag::lookup_terms(&result.chunk.content) {
+            if terms.len() >= MAX_LOOKUP_TERMS {
+                return terms;
+            }
+            if !terms.contains(&term) {
+                terms.push(term);
+            }
+        }
+    }
+    terms
+}
+
+/// ¿El contenido menciona literalmente alguno de los identificadores?
+fn mentions_term(content: &str, terms: &[String]) -> bool {
+    let content = content.to_lowercase();
+    terms.iter().any(|term| content.contains(term.as_str()))
+}
+
+/// Antepone los fragmentos de la carpeta hallados por referencia cruzada y
+/// completa con el resto, sin repetir ni perder los adjuntos.
+fn merge_linked(
+    base: Vec<RetrievedChunk>,
+    linked: Vec<RetrievedChunk>,
+    terms: &[String],
+    top_k: usize,
+) -> Vec<RetrievedChunk> {
+    let mut merged: Vec<RetrievedChunk> = Vec::new();
+    let limit = MAX_LOOKUP_RESULTS.min(top_k);
+
+    for result in linked
+        .into_iter()
+        .filter(|result| !result.origin.is_attachment())
+        .filter(|result| mentions_term(&result.chunk.content, terms))
+    {
+        if merged.len() >= limit {
+            break;
+        }
+        if !merged.iter().any(|kept| kept.chunk.id == result.chunk.id) {
+            merged.push(result);
+        }
+    }
+
+    for result in base {
+        if merged.len() >= top_k {
+            break;
+        }
+        if !merged.iter().any(|kept| kept.chunk.id == result.chunk.id) {
+            merged.push(result);
+        }
+    }
+
+    merged.truncate(top_k);
+    merged
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use raggy_rag::ChunkMetadata;
+    use raggy_rag::{ChunkMetadata, EmbeddingProvider};
     use raggy_storage::{Folder, FolderStatus, IndexOwner};
 
     fn chunk(id: &str, content: &str) -> raggy_rag::Chunk {
@@ -530,5 +627,109 @@ mod tests {
             .list_session_documents(&session.id)
             .expect("lista adjuntos")
             .is_empty());
+    }
+
+    #[test]
+    fn busca_en_la_carpeta_la_referencia_que_menciona_el_adjunto() {
+        let mut storage = Storage::open_in_memory().expect("abre SQLite");
+        let folder = Folder::new("/tmp/referencias", "referencias");
+        storage.upsert_folder(&folder).expect("guarda carpeta");
+        let session = raggy_storage::Session::new(&folder.id, "deepseek", "deepseek-chat");
+        storage.upsert_session(&session).expect("guarda sesión");
+
+        // Embeddings reales del pipeline, para que la similitud dependa del texto.
+        let embedding = |text: &str| HashingEmbedding::new(32).embed(text).vector;
+
+        // Un CSV sin la referencia: la pregunta («campos») encaja con él.
+        let proveedores = "campos: rfc, razon social, correo\nVUX170518WQG, Comercializadora Romero, ventas@romero.mx";
+        storage
+            .replace_file_index(
+                IndexOwner::Folder(&folder.id),
+                "proveedores.csv",
+                &[chunk("proveedores", proveedores)],
+                &[embedding(proveedores)],
+                &raggy_storage::Document::new(&folder.id, "proveedores.csv", "h", "p", 90, 0, 1),
+            )
+            .expect("guarda proveedores");
+
+        // El CSV referenciado por la factura: la pregunta no lo menciona.
+        let filas: String = (0..80)
+            .map(|index| format!("V-2024-000{index:02}, cliente {index}, 100\n"))
+            .collect();
+        let contenido_ventas =
+            format!("folio, cliente, importe\n{filas}V-2024-00953, ACME, 1160\n");
+        let mut ventas = chunk("ventas", &contenido_ventas);
+        ventas.metadata.source_file = "ventas.csv".to_string();
+        ventas.metadata.source_path = "ventas.csv".to_string();
+        ventas.metadata.location = Some("filas 1-81".to_string());
+        storage
+            .replace_file_index(
+                IndexOwner::Folder(&folder.id),
+                "ventas.csv",
+                &[ventas],
+                &[embedding(&contenido_ventas)],
+                &raggy_storage::Document::new(&folder.id, "ventas.csv", "h", "p", 900, 0, 1),
+            )
+            .expect("guarda ventas");
+
+        // La factura adjunta menciona el folio; la pregunta, no.
+        let factura = "Factura de venta. Referencia ventas.csv: V-2024-00953. Total 1160.00";
+        storage
+            .replace_file_index(
+                IndexOwner::Session(&session.id),
+                "factura.pdf",
+                &[adjunto("factura", "factura.pdf", factura)],
+                &[embedding(factura)],
+                &raggy_storage::Document::for_session(
+                    &session.id,
+                    "factura.pdf",
+                    "h",
+                    "p",
+                    200,
+                    0,
+                    1,
+                ),
+            )
+            .expect("guarda el adjunto");
+
+        let mut cache = SearchCache::default();
+        let options = RetrieverOptions {
+            top_k: 5,
+            relative_floor: 0.3,
+        };
+
+        // Sin la referencia cruzada, el CSV referenciado por la factura no se
+        // recupera: la pregunta no menciona el folio.
+        let retriever =
+            build_chat_retriever(&storage, &folder.id, &session.id, 32).expect("construye");
+        let sin_referencia = retriever.retrieve("¿qué campos tiene la factura?", &options);
+        assert!(
+            !sin_referencia
+                .iter()
+                .any(|result| result.chunk.id == "ventas"),
+            "el folio no aparece en la pregunta: {sin_referencia:?}"
+        );
+
+        let results = cache
+            .search_chat(
+                &storage,
+                &folder.id,
+                &session.id,
+                "¿qué campos tiene la factura?",
+                &options,
+                32,
+            )
+            .expect("busca");
+
+        assert!(
+            results
+                .iter()
+                .any(|result| result.chunk.id == "ventas" && result.origin == ChunkOrigin::Folder),
+            "la fila referenciada por el adjunto debe entrar en el contexto: {results:?}"
+        );
+        assert!(
+            results.iter().any(|result| result.origin.is_attachment()),
+            "el adjunto debe seguir presente: {results:?}"
+        );
     }
 }

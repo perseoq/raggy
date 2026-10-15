@@ -36,4 +36,5 @@ pub use retriever::{
 };
 pub use section::{chunk_sections, DocumentSection, SectionLocation};
 pub use stopwords::is_stopword;
+pub use text::{lookup_terms, tokenize};
 pub use vector::VectorIndex;

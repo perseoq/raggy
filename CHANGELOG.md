@@ -10,6 +10,16 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.2.7] - 2026-10-15
+
+### Añadido
+
+- **Búsqueda por referencia cruzada (HU-34)**: si un adjunto menciona un
+  identificador (el folio de una factura que apunta a una fila de `ventas.csv`,
+  por ejemplo), ese identificador se busca también en la carpeta y se antepone al
+  contexto. Antes, la pregunta no solía incluir el folio y la fila referenciada
+  nunca llegaba al modelo, que respondía que el registro no aparecía.
+
 ## [2.2.6] - 2026-10-15
 
 ### Corregido
