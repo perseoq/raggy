@@ -38,8 +38,16 @@ pub fn context_from_retrieved(chunks: &[RetrievedChunk]) -> (Vec<ContextBlock>, 
     (blocks, citations)
 }
 
+/// Máximo de mensajes previos que se envían como historial.
+const MAX_HISTORY_MESSAGES: usize = 20;
+/// Máximo de caracteres de historial que se envían al proveedor.
+const MAX_HISTORY_CHARS: usize = 12_000;
+
 /// Compone la petición de chat: prompt de sistema estricto (HU-14), memoria de
-/// artefactos (HU-21), historial de la sesión y mensaje del usuario.
+/// artefactos (HU-21), historial reciente de la sesión y mensaje del usuario.
+///
+/// El historial se recorta a los mensajes más recientes (por número y por
+/// caracteres) para no reenviar conversaciones enteras en cada turno.
 pub fn compose_request(
     model: &str,
     temperature: f32,
@@ -50,7 +58,7 @@ pub fn compose_request(
     user_message: &str,
 ) -> ChatRequest {
     let mut messages = vec![ChatMessage::system(build_system_prompt(context, artifacts))];
-    for message in history {
+    for message in recent_history(history) {
         let role = match message.role.as_str() {
             "user" => raggy_llm::Role::User,
             "assistant" => raggy_llm::Role::Assistant,
@@ -69,6 +77,26 @@ pub fn compose_request(
         temperature,
         max_tokens,
     }
+}
+
+/// Devuelve los mensajes más recientes que caben en los límites de historial,
+/// conservando siempre el último y el orden cronológico.
+fn recent_history(history: &[Message]) -> Vec<&Message> {
+    let mut selected: Vec<&Message> = Vec::new();
+    let mut chars = 0usize;
+    for message in history.iter().rev() {
+        if selected.len() >= MAX_HISTORY_MESSAGES {
+            break;
+        }
+        let length = message.content.chars().count();
+        if !selected.is_empty() && chars + length > MAX_HISTORY_CHARS {
+            break;
+        }
+        chars += length;
+        selected.push(message);
+    }
+    selected.reverse();
+    selected
 }
 
 /// Comandos aceptados por el hilo de chat.
@@ -301,5 +329,42 @@ fn generate(
                 message: error.to_string(),
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn historial(count: usize, size: usize) -> Vec<Message> {
+        (0..count)
+            .map(|index| {
+                let role = if index % 2 == 0 { "user" } else { "assistant" };
+                Message::new("s", role, "x".repeat(size), false, Vec::new())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn recorta_el_historial_por_numero_de_mensajes() {
+        let messages = historial(50, 10);
+        let request = compose_request("m", 0.1, 256, &[], &[], &messages, "nueva");
+        assert_eq!(request.messages.len(), 1 + MAX_HISTORY_MESSAGES + 1);
+        assert_eq!(request.messages.last().expect("último").content, "nueva");
+    }
+
+    #[test]
+    fn recorta_el_historial_por_caracteres() {
+        let messages = historial(50, 3_000);
+        let request = compose_request("m", 0.1, 256, &[], &[], &messages, "nueva");
+        let enviados: usize = request.messages[1..request.messages.len() - 1]
+            .iter()
+            .map(|message| message.content.chars().count())
+            .sum();
+        assert!(
+            enviados <= MAX_HISTORY_CHARS,
+            "historial enviado: {enviados}"
+        );
+        assert!(request.messages.len() >= 2);
     }
 }

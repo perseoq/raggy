@@ -10,6 +10,22 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.2.3] - 2026-10-15
+
+### Cambiado
+
+- **Rendimiento de ingesta**: la detección de Tesseract/Poppler/LibreOffice se
+  memoriza durante 30 segundos, de modo que no se lanza `tesseract --list-langs`
+  una vez por carpeta ni por cada PDF escaneado. El botón «Comprobar
+  herramientas» fuerza una detección nueva.
+- La fecha de revisión de una carpeta solo avanza al **terminar** la indexación;
+  así la caché de búsqueda no se reconstruye a mitad de proceso ni dos veces por
+  reindexado.
+- El historial que se envía al proveedor se recorta a los 20 mensajes y 12 000
+  caracteres más recientes, en vez de reenviar la conversación completa.
+- La interfaz calcula la prosa, los bloques de código y las citas verificadas de
+  cada mensaje una sola vez al cargarlo, no en cada fotograma.
+
 ## [2.2.2] - 2026-10-15
 
 ### Añadido

@@ -92,6 +92,19 @@ impl Storage {
         Ok(())
     }
 
+    /// Marca la carpeta como «en indexación» sin cambiar su fecha de revisión.
+    ///
+    /// La fecha solo avanza cuando la indexación termina, de modo que la caché de
+    /// búsqueda no se invalida a mitad de proceso (evita reconstruir el
+    /// recuperador con datos parciales y luego otra vez).
+    pub fn mark_folder_indexing(&self, id: &str) -> Result<()> {
+        self.connection().execute(
+            "UPDATE folders SET status = ?2, file_count = 0 WHERE id = ?1",
+            params![id, FolderStatus::Indexing.as_str()],
+        )?;
+        Ok(())
+    }
+
     /// Elimina una carpeta y, en cascada, sus documentos y chunks.
     pub fn delete_folder(&self, id: &str) -> Result<()> {
         self.connection()

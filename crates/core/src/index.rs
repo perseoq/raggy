@@ -222,7 +222,7 @@ pub fn index_folder(
         });
     }
 
-    storage.set_folder_status(folder_id, FolderStatus::Indexing, 0)?;
+    storage.mark_folder_indexing(folder_id)?;
 
     let (mut files, scan_complete, scan_warnings) = scan_indexable_files_checked(root);
     files.sort();

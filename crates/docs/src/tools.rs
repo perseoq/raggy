@@ -7,9 +7,36 @@
 //! se empaqueta con la aplicación: se detectan en el sistema y, si faltan, se
 //! avisa con el comando de instalación adecuado.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
+/// Tiempo que se reutiliza el resultado de la detección. Evita lanzar
+/// `tesseract --list-langs` una vez por carpeta o por PDF dentro de la misma
+/// indexación, sin impedir que instalar una herramienta se detecte poco después.
+const TOOLS_CACHE_TTL: Duration = Duration::from_secs(30);
+
+fn cache() -> &'static Mutex<HashMap<u64, (Instant, Tools)>> {
+    static CACHE: OnceLock<Mutex<HashMap<u64, (Instant, Tools)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Devuelve la detección memorizada si sigue vigente.
+fn cached(timeout_secs: u64) -> Option<Tools> {
+    let cache = cache().lock().ok()?;
+    let (at, tools) = cache.get(&timeout_secs)?;
+    (at.elapsed() < TOOLS_CACHE_TTL).then(|| tools.clone())
+}
+
+/// Descarta la detección memorizada para forzar una nueva (p. ej. tras instalar
+/// una herramienta o al pulsar «Comprobar herramientas»).
+pub fn invalidate_cache() {
+    if let Ok(mut cache) = cache().lock() {
+        cache.clear();
+    }
+}
 
 /// Herramienta externa opcional.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,7 +90,22 @@ impl Tools {
 
     /// Detecta herramientas; la consulta a `tesseract --list-langs` queda
     /// limitada para que el diagnóstico no pueda bloquear indefinidamente.
+    ///
+    /// El resultado se reutiliza durante [`TOOLS_CACHE_TTL`] para no repetir el
+    /// subproceso en cada carpeta o documento.
     pub fn detect_with_timeout(timeout_secs: u64) -> Self {
+        if let Some(tools) = cached(timeout_secs) {
+            return tools;
+        }
+        let tools = Self::probe(timeout_secs);
+        if let Ok(mut cache) = cache().lock() {
+            cache.insert(timeout_secs, (Instant::now(), tools.clone()));
+        }
+        tools
+    }
+
+    /// Consulta real de las herramientas, sin caché.
+    fn probe(timeout_secs: u64) -> Self {
         let probe_timeout = timeout_secs.clamp(1, crate::limits::MAX_TOOL_PROBE_TIMEOUT_SECS);
         let tesseract = find_program(ExternalTool::Tesseract);
         let language_result = tesseract

@@ -1,10 +1,12 @@
 //! Diagnóstico de las herramientas externas de la ingesta (OCR y conversión).
 
-use raggy_docs::tools::{find_libreoffice, install_hint, ExternalTool, Tools};
+use raggy_docs::tools::{find_libreoffice, install_hint, invalidate_cache, ExternalTool, Tools};
 
 /// Informe legible del estado de Tesseract, Poppler y LibreOffice, con las
-/// pistas de instalación cuando falten.
+/// pistas de instalación cuando falten. Fuerza una detección nueva para reflejar
+/// una instalación reciente (el botón «Comprobar herramientas»).
 pub fn tools_report(languages: &[String], timeout_secs: u64) -> String {
+    invalidate_cache();
     let tools = Tools::detect_with_timeout(timeout_secs);
     let mut lines = Vec::new();
 

@@ -110,6 +110,31 @@ struct StreamingState {
     text: String,
 }
 
+/// Datos de un mensaje ya calculados para dibujarlo, de modo que el bucle de la
+/// interfaz no vuelva a partir el texto ni a verificar citas en cada fotograma.
+struct RenderedMessage {
+    prose: String,
+    blocks: Vec<CodeBlock>,
+    citations: Vec<Citation>,
+}
+
+/// Calcula la prosa, los bloques de código y las citas verificadas de un mensaje.
+fn render_message(message: &Message) -> RenderedMessage {
+    if message.role == "user" {
+        RenderedMessage {
+            prose: message.content.clone(),
+            blocks: Vec::new(),
+            citations: Vec::new(),
+        }
+    } else {
+        RenderedMessage {
+            prose: raggy_llm::strip_code_blocks(&message.content),
+            blocks: extract_code_blocks(&message.content),
+            citations: verify_citations(&message.content, &message.citations),
+        }
+    }
+}
+
 /// Diálogo modal de sesiones.
 enum SessionDialog {
     Rename { id: String, title: String },
@@ -197,6 +222,7 @@ pub struct RaggyApp {
     sessions: Vec<Session>,
     active_session: Option<Session>,
     messages: Vec<Message>,
+    rendered: HashMap<String, RenderedMessage>,
     chat_input: String,
     streaming: Option<StreamingState>,
     chat_error: Option<String>,
@@ -265,6 +291,7 @@ impl RaggyApp {
             sessions: Vec::new(),
             active_session: None,
             messages: Vec::new(),
+            rendered: HashMap::new(),
             chat_input: String::new(),
             streaming: None,
             chat_error: None,
@@ -654,6 +681,7 @@ impl RaggyApp {
                 self.selected_folder = Some(session.folder_id.clone());
                 self.messages = storage.list_messages(&id).unwrap_or_default();
                 self.artifacts = storage.list_artifacts_by_session(&id).unwrap_or_default();
+                self.refresh_rendered();
                 self.active_session = Some(session);
                 self.chat_input.clear();
                 self.chat_error = None;
@@ -696,6 +724,7 @@ impl RaggyApp {
         if self.active_session.as_ref().is_some_and(|s| s.id == id) {
             self.active_session = None;
             self.messages.clear();
+            self.rendered.clear();
             self.streaming = None;
         }
         self.reload_sessions();
@@ -749,6 +778,17 @@ impl RaggyApp {
         }
         if let Some(storage) = &self.storage {
             self.messages = storage.list_messages(session_id).unwrap_or_default();
+        }
+        self.refresh_rendered();
+    }
+
+    /// Recalcula los datos de dibujo de los mensajes cargados. Se hace al cargar
+    /// una sesión o al terminar una respuesta, no en cada fotograma.
+    fn refresh_rendered(&mut self) {
+        self.rendered.clear();
+        for message in &self.messages {
+            self.rendered
+                .insert(message.id.clone(), render_message(message));
         }
     }
 
@@ -848,6 +888,7 @@ impl RaggyApp {
                 }
                 let _ = storage.touch_session(&session.id);
                 self.messages = storage.list_messages(&session.id).unwrap_or_default();
+                self.refresh_rendered();
             }
         }
 
@@ -1372,6 +1413,7 @@ impl RaggyApp {
             self.active_session = None;
             self.sessions.clear();
             self.messages.clear();
+            self.rendered.clear();
             self.reload_documents();
         }
         self.last_watch.remove(id);
@@ -2141,13 +2183,17 @@ impl RaggyApp {
 
                 for message in &self.messages {
                     let is_user = message.role == "user";
+                    // Si falta en la caché (caso raro), se calcula al vuelo.
+                    let computed;
+                    let rendered = if let Some(cached) = self.rendered.get(&message.id) {
+                        cached
+                    } else {
+                        computed = render_message(message);
+                        &computed
+                    };
 
                     // La prosa va en la burbuja; el código, en su tarjeta.
-                    let prose = if is_user {
-                        message.content.clone()
-                    } else {
-                        raggy_llm::strip_code_blocks(&message.content)
-                    };
+                    let prose = rendered.prose.as_str();
                     if !prose.trim().is_empty() {
                         message_bubble(ui, prose.trim(), is_user);
                     }
@@ -2156,7 +2202,7 @@ impl RaggyApp {
                         render_code_blocks(
                             ui,
                             &message.id,
-                            &message.content,
+                            &rendered.blocks,
                             &self.code_edits,
                             &self.previews,
                             &mut pending_edits,
@@ -2164,15 +2210,14 @@ impl RaggyApp {
                             &mut actions,
                         );
 
-                        let citations = verify_citations(&message.content, &message.citations);
-                        if citations.is_empty() {
+                        if rendered.citations.is_empty() {
                             ui.weak("Sin citas verificadas.");
                         } else {
                             ui.horizontal_wrapped(|ui| {
                                 ui.small("Fuentes verificadas:");
-                                for citation in citations {
+                                for citation in &rendered.citations {
                                     if ui.link(citation.label()).clicked() {
-                                        actions.push(CentralAction::OpenCitation(citation));
+                                        actions.push(CentralAction::OpenCitation(citation.clone()));
                                     }
                                 }
                             });
@@ -3655,14 +3700,13 @@ fn tint_for(ui: &egui::Ui, highlighted: bool) -> egui::Color32 {
 fn render_code_blocks(
     ui: &mut egui::Ui,
     message_id: &str,
-    content: &str,
+    blocks: &[CodeBlock],
     edits: &HashMap<String, String>,
     previews: &HashMap<String, bool>,
     pending_edits: &mut Vec<(String, String)>,
     pending_previews: &mut Vec<String>,
     actions: &mut Vec<CentralAction>,
 ) {
-    let blocks = extract_code_blocks(content);
     if blocks.is_empty() {
         return;
     }

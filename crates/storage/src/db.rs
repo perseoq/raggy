@@ -89,6 +89,42 @@ impl Storage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{Folder, FolderStatus};
+
+    #[test]
+    fn marcar_indexando_no_cambia_la_revision_de_la_carpeta() {
+        let storage = Storage::open_in_memory().expect("abre en memoria");
+        let folder = Folder::new("/tmp/raggy-revision", "revision");
+        storage.upsert_folder(&folder).expect("guarda carpeta");
+        let before = storage
+            .get_folder(&folder.id)
+            .expect("lee carpeta")
+            .expect("existe")
+            .updated_at;
+
+        storage.mark_folder_indexing(&folder.id).expect("marca");
+        let during = storage
+            .get_folder(&folder.id)
+            .expect("lee carpeta")
+            .expect("existe");
+        assert_eq!(
+            during.updated_at, before,
+            "indexar no debe invalidar la caché de búsqueda"
+        );
+        assert_eq!(during.status, FolderStatus::Indexing);
+
+        storage
+            .set_folder_status(&folder.id, FolderStatus::Indexed, 3)
+            .expect("termina");
+        let after = storage
+            .get_folder(&folder.id)
+            .expect("lee carpeta")
+            .expect("existe");
+        assert_ne!(
+            after.updated_at, before,
+            "al terminar sí avanza la revisión"
+        );
+    }
 
     #[test]
     fn las_migraciones_dejan_la_version_esperada() {
