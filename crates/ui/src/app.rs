@@ -1,6 +1,6 @@
 //! Aplicación `egui` de Raggy Desktop.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
@@ -187,7 +187,6 @@ enum CentralAction {
         provider: Option<ProviderId>,
     },
     RetryWithFallback,
-    OpenKeys,
     AttachFiles,
     RemoveAttachment(String),
     CopyCode(String),
@@ -248,6 +247,16 @@ pub struct RaggyApp {
     key_status: HashMap<ProviderId, KeyStatus>,
     test_tx: Sender<(ProviderId, Result<Vec<String>, String>)>,
     test_rx: Receiver<(ProviderId, Result<Vec<String>, String>)>,
+    /// Modelos que el proveedor ha detectado con su API Key (HU-24).
+    detected_models: HashMap<ProviderId, Vec<String>>,
+    /// Proveedores con una detección de modelos en curso.
+    detecting_models: HashSet<ProviderId>,
+    /// Último error al detectar modelos, por proveedor.
+    model_errors: HashMap<ProviderId, String>,
+    detect_tx: Sender<(ProviderId, Result<Vec<String>, String>)>,
+    detect_rx: Receiver<(ProviderId, Result<Vec<String>, String>)>,
+    /// Proveedor cuyo aviso flotante de API Key ausente está abierto (HU-23).
+    api_key_alert: Option<ProviderId>,
     last_failure: Option<Failure>,
     artifacts: Vec<Artifact>,
     artifacts_open: bool,
@@ -275,6 +284,7 @@ impl RaggyApp {
         let key_tab =
             ProviderId::from_key(&config.model.default_provider).unwrap_or(ProviderId::DeepSeek);
         let (test_tx, test_rx) = mpsc::channel();
+        let (detect_tx, detect_rx) = mpsc::channel();
 
         let mut app = Self {
             config,
@@ -320,6 +330,12 @@ impl RaggyApp {
             key_status: HashMap::new(),
             test_tx,
             test_rx,
+            detected_models: HashMap::new(),
+            detecting_models: HashSet::new(),
+            model_errors: HashMap::new(),
+            detect_tx,
+            detect_rx,
+            api_key_alert: None,
             last_failure: None,
             artifacts: Vec::new(),
             artifacts_open: false,
@@ -395,7 +411,20 @@ impl RaggyApp {
                 }
                 Err(error) => KeyStatus::Error(error.to_string()),
             };
+            let configured = matches!(
+                status,
+                KeyStatus::Stored { .. } | KeyStatus::Environment { .. } | KeyStatus::Ok { .. }
+            );
             self.key_status.insert(provider, status);
+
+            // Si hay clave y aún no se conocen sus modelos, se detectan al vuelo
+            // para que el selector no muestre una lista fija (HU-24).
+            if configured
+                && !self.detected_models.contains_key(&provider)
+                && !self.detecting_models.contains(&provider)
+            {
+                self.detect_models(provider);
+            }
         }
     }
 
@@ -438,6 +467,9 @@ impl RaggyApp {
                     input.zeroize();
                 }
                 self.refresh_keys();
+                // La clave cambió: se descarta la lista anterior y se detecta de nuevo.
+                self.detected_models.remove(&provider);
+                self.detect_models(provider);
                 self.status = format!(
                     "Clave de {} guardada en settings.json.",
                     provider.display_name()
@@ -457,6 +489,8 @@ impl RaggyApp {
                     previous.zeroize();
                 }
                 self.refresh_keys();
+                self.detected_models.remove(&provider);
+                self.model_errors.remove(&provider);
                 self.status = format!("Clave de {} eliminada.", provider.display_name());
             }
             Err(error) => {
@@ -491,14 +525,70 @@ impl RaggyApp {
     fn drain_key_tests(&mut self) {
         for (provider, result) in self.test_rx.try_iter() {
             let status = match result {
-                Ok(models) => KeyStatus::Ok {
-                    count: models.len(),
-                    sample: models.first().cloned().unwrap_or_default(),
-                },
+                Ok(models) => {
+                    // La prueba de conexión ya trae los modelos: sirve también
+                    // para el selector (HU-24).
+                    if !models.is_empty() {
+                        self.detected_models.insert(provider, models.clone());
+                        self.model_errors.remove(&provider);
+                    }
+                    KeyStatus::Ok {
+                        count: models.len(),
+                        sample: models.first().cloned().unwrap_or_default(),
+                    }
+                }
                 Err(message) => KeyStatus::Error(message),
             };
             self.key_status.insert(provider, status);
         }
+    }
+
+    /// Lanza en segundo plano la detección de los modelos del proveedor (HU-24).
+    ///
+    /// Solo se consulta si hay una clave; así el selector de modelo ofrece lo que
+    /// el proveedor devuelve de verdad y no una lista fija.
+    fn detect_models(&mut self, provider: ProviderId) {
+        if self.detecting_models.contains(&provider) {
+            return;
+        }
+        let Some(secret) = resolve_key(self.secrets.as_ref(), provider) else {
+            return;
+        };
+
+        self.detecting_models.insert(provider);
+        self.model_errors.remove(&provider);
+        let sender = self.detect_tx.clone();
+        std::thread::spawn(move || {
+            let result = raggy_llm::check_connection_with_key(provider, secret.expose())
+                .map_err(|error| error.to_string());
+            let _ = sender.send((provider, result));
+        });
+    }
+
+    fn drain_model_detections(&mut self) {
+        for (provider, result) in self.detect_rx.try_iter() {
+            self.detecting_models.remove(&provider);
+            match result {
+                Ok(models) if !models.is_empty() => {
+                    self.detected_models.insert(provider, models);
+                    self.model_errors.remove(&provider);
+                }
+                Ok(_) => {
+                    self.model_errors.insert(
+                        provider,
+                        "el proveedor no devolvió ningún modelo".to_string(),
+                    );
+                }
+                Err(error) => {
+                    self.model_errors.insert(provider, error);
+                }
+            }
+        }
+    }
+
+    /// Abre el aviso flotante de API Key ausente para un proveedor.
+    fn ask_api_key(&mut self, provider: ProviderId) {
+        self.api_key_alert = Some(provider);
     }
 
     // ---------------------------------------------------------- configuración
@@ -728,6 +818,8 @@ impl RaggyApp {
         };
         match storage.get_session(&id) {
             Ok(Some(session)) => {
+                let provider =
+                    ProviderId::from_key(&session.provider).unwrap_or(ProviderId::DeepSeek);
                 self.selected_folder = Some(session.folder_id.clone());
                 self.messages = storage.list_messages(&id).unwrap_or_default();
                 self.artifacts = storage.list_artifacts_by_session(&id).unwrap_or_default();
@@ -740,6 +832,11 @@ impl RaggyApp {
                 self.results.clear();
                 self.search_note = None;
                 self.clear_chunks_panel();
+                // Si al proveedor de la sesión le falta la clave, se avisa con la
+                // alerta flotante (HU-23).
+                if !self.provider_ready(provider) {
+                    self.ask_api_key(provider);
+                }
             }
             Ok(None) => self.status = "La sesión ya no existe.".to_string(),
             Err(error) => self.status = format!("No se pudo abrir la sesión: {error}"),
@@ -948,6 +1045,15 @@ impl RaggyApp {
         let content = self.chat_input.trim().to_string();
         if content.is_empty() {
             return;
+        }
+
+        // Sin clave no se lanza la petición: se avisa con la alerta flotante.
+        if let Some(session) = self.active_session.clone() {
+            let provider = ProviderId::from_key(&session.provider).unwrap_or(ProviderId::DeepSeek);
+            if resolve_key(self.secrets.as_ref(), provider).is_none() {
+                self.ask_api_key(provider);
+                return;
+            }
         }
 
         let history = self.messages.clone();
@@ -2177,15 +2283,53 @@ impl RaggyApp {
                     });
 
                 let mut selected_model = session.model.clone();
+                // El selector usa los modelos que detecta el proveedor con la
+                // clave del usuario, no una lista fija (HU-24).
+                let detected = self.detected_models.get(&selected_provider).cloned();
+                let detecting = self.detecting_models.contains(&selected_provider);
+                let model_error = self.model_errors.get(&selected_provider).cloned();
+                let provider_missing = !self.provider_ready(selected_provider);
                 egui::ComboBox::from_id_salt("model_selector")
                     .selected_text(session.model.clone())
                     .show_ui(ui, |ui| {
-                        for candidate in selected_provider.models() {
-                            ui.selectable_value(
-                                &mut selected_model,
-                                (*candidate).to_string(),
-                                *candidate,
-                            );
+                        match detected {
+                            Some(models) => {
+                                // Si el modelo guardado no está en la lista
+                                // detectada, se ofrece primero para no perderlo.
+                                if !models.contains(&session.model) {
+                                    ui.selectable_value(
+                                        &mut selected_model,
+                                        session.model.clone(),
+                                        session.model.clone(),
+                                    );
+                                    ui.separator();
+                                }
+                                for candidate in models {
+                                    ui.selectable_value(
+                                        &mut selected_model,
+                                        candidate.clone(),
+                                        candidate,
+                                    );
+                                }
+                            }
+                            None => {
+                                // Sin detección se ofrece solo el modelo actual y
+                                // una pista de por qué no hay lista.
+                                if let Some(error) = &model_error {
+                                    ui.weak(format!("No se detectaron modelos: {error}"));
+                                } else if detecting {
+                                    ui.weak("Detectando modelos…");
+                                } else if provider_missing {
+                                    ui.weak("Sin API Key: configura la clave para ver los modelos");
+                                } else {
+                                    ui.weak("Detectando modelos…");
+                                }
+                                ui.selectable_value(
+                                    &mut selected_model,
+                                    session.model.clone(),
+                                    session.model.clone(),
+                                );
+                            }
                         }
                     });
 
@@ -2229,12 +2373,20 @@ impl RaggyApp {
                 }
 
                 if !self.provider_ready(provider) {
-                    ui.colored_label(
-                        crate::theme::warning_color(dark),
-                        format!("Sin API Key ({})", provider.api_key_env()),
-                    );
-                    if ui.button("Configurar").clicked() {
-                        actions.push(CentralAction::OpenKeys);
+                    // El aviso en sí es una ventana flotante; aquí solo queda un
+                    // botón discreto para volver a abrirla.
+                    let alert_text = egui::RichText::new("Falta la API Key")
+                        .color(crate::theme::warning_color(dark));
+                    if ui
+                        .button(alert_text)
+                        .on_hover_text(format!(
+                            "Configura {} para usar {}",
+                            provider.api_key_env(),
+                            provider.display_name()
+                        ))
+                        .clicked()
+                    {
+                        self.ask_api_key(provider);
                     }
                 }
 
@@ -2908,6 +3060,8 @@ impl RaggyApp {
         let mut open = true;
         let mut actions: Vec<KeyAction> = Vec::new();
         let statuses = self.key_status.clone();
+        let detected = self.detected_models.clone();
+        let detecting = self.detecting_models.clone();
         let settings_path = self.paths.settings_path();
         let mut tab = self.key_tab;
 
@@ -2978,7 +3132,19 @@ impl RaggyApp {
                     "Alternativa: defínela en la variable de entorno {}.",
                     tab.api_key_env()
                 ));
-                ui.small(format!("Modelos sugeridos: {}", tab.models().join(", ")));
+                // Los modelos se muestran tal como los devuelve el proveedor
+                // (detección con la clave), nunca una lista fija (HU-24).
+                match detected.get(&tab) {
+                    Some(models) => ui.small(format!(
+                        "Modelos detectados ({}): {}",
+                        models.len(),
+                        models.join(", ")
+                    )),
+                    None if detecting.contains(&tab) => ui.small("Detectando modelos…"),
+                    None => ui.small(
+                        "Guarda la clave para detectar automáticamente los modelos disponibles.",
+                    ),
+                };
             });
 
         self.key_tab = tab;
@@ -3552,6 +3718,55 @@ impl RaggyApp {
         }
     }
 
+    /// Ventana flotante que avisa de que al proveedor le falta la API Key (HU-23).
+    ///
+    /// Sustituye al mensaje fijo «Sin API Key (… )» de la cabecera: aparece como
+    /// alerta, explica la variable de entorno y lleva a configurarla.
+    fn api_key_alert_window(&mut self, ctx: &egui::Context) {
+        let Some(provider) = self.api_key_alert else {
+            return;
+        };
+
+        let mut configure = false;
+        let mut close = false;
+
+        egui::Window::new("Falta la API Key")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.set_max_width(460.0);
+                ui.label(format!(
+                    "El proveedor {} no tiene una API Key configurada, así que no se puede \
+                     generar la respuesta.",
+                    provider.display_name()
+                ));
+                ui.add_space(4.0);
+                ui.label(format!(
+                    "Guárdala en Claves de API o define la variable de entorno {}.",
+                    provider.api_key_env()
+                ));
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Configurar claves").clicked() {
+                        configure = true;
+                    }
+                    if ui.button("Cerrar").clicked() {
+                        close = true;
+                    }
+                });
+            });
+
+        if close || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.api_key_alert = None;
+        }
+        if configure {
+            self.api_key_alert = None;
+            self.key_tab = provider;
+            self.keys_open = true;
+        }
+    }
+
     /// Exporta la sesión activa a Markdown (HU-31).
     fn export_session(&mut self) {
         let Some(session) = self.active_session.clone() else {
@@ -3674,10 +3889,6 @@ impl RaggyApp {
                     self.set_session_fallback(provider);
                 }
                 CentralAction::RetryWithFallback => self.retry_with_fallback(),
-                CentralAction::OpenKeys => {
-                    self.refresh_keys();
-                    self.keys_open = true;
-                }
                 CentralAction::AttachFiles => self.attach_files(),
                 CentralAction::RemoveAttachment(relative_path) => {
                     self.remove_attachment(&relative_path);
@@ -3759,6 +3970,7 @@ impl eframe::App for RaggyApp {
         self.drain_events();
         self.drain_chat_events();
         self.drain_key_tests();
+        self.drain_model_detections();
         self.poll_watcher();
         if self.worker.is_some() || self.chat_worker.is_some() || self.watcher.is_some() {
             ctx.request_repaint_after(Duration::from_millis(120));
@@ -3774,6 +3986,7 @@ impl eframe::App for RaggyApp {
         self.conflict_dialog(&ctx);
         self.import_confirm(&ctx);
         self.notice_window(&ctx);
+        self.api_key_alert_window(&ctx);
     }
 
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {

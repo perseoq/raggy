@@ -69,24 +69,6 @@ impl ProviderId {
         }
     }
 
-    /// Modelos sugeridos para el selector.
-    pub fn models(self) -> &'static [&'static str] {
-        match self {
-            ProviderId::OpenAi => &["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini"],
-            ProviderId::Anthropic => &[
-                "claude-3-5-sonnet-latest",
-                "claude-3-5-haiku-latest",
-                "claude-3-opus-latest",
-            ],
-            ProviderId::DeepSeek => &["deepseek-chat", "deepseek-flash", "deepseek-v4-pro"],
-            ProviderId::OpenRouter => &[
-                "openai/gpt-4o-mini",
-                "anthropic/claude-3.5-sonnet",
-                "google/gemini-flash-1.5",
-            ],
-        }
-    }
-
     /// Interpreta una clave almacenada en configuración.
     pub fn from_key(key: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|provider| provider.key() == key)

@@ -108,6 +108,10 @@ Windows.
 - **Multi-proveedor por sesión**: OpenAI, Anthropic, DeepSeek y OpenRouter.
 - **Prueba de conexión** por proveedor y **proveedor de respaldo** si el activo
   falla (nunca se cambia sin tu consentimiento).
+- **Modelos autodetectados**: al guardar una clave, la app consulta el catálogo
+  del proveedor y ofrece en el selector los modelos reales, sin listas fijas.
+- **Aviso de clave ausente**: si el chat no tiene clave para su proveedor, sale
+  una **ventana flotante** con un atajo para configurarla.
 - **Tema** claro (**Novel**), oscuro (**Tokyo Night**) o el del sistema; los
   bloques de código en modo oscuro usan el resaltado **Monokai Pro** de Sublime
   Text;
@@ -181,15 +185,18 @@ datos, la exportación de la sesión activa y el respaldo/restauración.
 
 ## Proveedores y modelos
 
-| Proveedor | Modelos sugeridos |
+| Proveedor | Modelos |
 |---|---|
-| DeepSeek | `deepseek-chat`, `deepseek-flash`, `deepseek-v4-pro` |
-| OpenAI | `gpt-4o-mini`, `gpt-4o`, `gpt-4.1-mini` |
-| Anthropic | `claude-3-5-sonnet-latest`, `claude-3-5-haiku-latest`, `claude-3-opus-latest` |
-| OpenRouter | `openai/gpt-4o-mini`, `anthropic/claude-3.5-sonnet`, `google/gemini-flash-1.5` |
+| DeepSeek | se detectan con tu clave |
+| OpenAI | se detectan con tu clave |
+| Anthropic | se detectan con tu clave |
+| OpenRouter | se detectan con tu clave |
 
-El modelo por defecto de cada sesión es `deepseek-chat`. El campo de modelo
-acepta cualquier identificador válido del proveedor.
+El modelo por defecto de cada sesión es `deepseek-chat`, y el campo acepta
+cualquier identificador válido del proveedor. En cuanto guardas la clave de un
+proveedor, la app **consulta su catálogo** y el selector del chat ofrece los
+modelos que devuelve ese proveedor (no una lista fija); si la detección falla,
+muestra el error y mantiene el modelo actual.
 
 ---
 

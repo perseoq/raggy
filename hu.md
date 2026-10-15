@@ -348,9 +348,12 @@ documentos soportados,
 
 **Criterios de aceptación:**
 - Panel de configuración con un campo por proveedor.
-- Las claves se guardan cifradas en el almacén del sistema.
+- Las claves se guardan en `settings.json` (permisos restringidos en Unix); no se
+  cifran ni se guardan en el llavero del sistema.
 - Nunca se muestran completas tras guardarlas (solo últimos 4 caracteres).
 - Existe botón "Probar conexión" por proveedor.
+- Si el chat usa un proveedor sin clave, el aviso aparece como **ventana flotante**
+  (con atajo para configurarla), no como mensaje fijo en la interfaz.
 
 ---
 
@@ -363,6 +366,8 @@ documentos soportados,
 - El botón "Probar" hace una llamada mínima al proveedor.
 - Se muestra resultado: éxito con modelo listado, o error descriptivo.
 - Los errores comunes (clave inválida, sin crédito, rate limit) se traducen a mensajes claros.
+- Los modelos que devuelve el proveedor se ofrecen en el selector del chat; la
+  detección es automática al guardar la clave, sin listas recomendadas fijas.
 
 ---
 

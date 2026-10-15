@@ -10,6 +10,24 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.2.12] - 2026-10-15
+
+### Cambiado
+
+- El aviso de API Key ausente deja de ser un mensaje fijo en la cabecera del chat:
+  ahora es una **ventana flotante** que explica la variable de entorno esperada y
+  lleva a configurar la clave (HU-23). En la cabecera solo queda un botón discreto.
+- El selector de modelo del chat usa los **modelos que detecta el proveedor** con
+  la clave del usuario (HU-24) en lugar de una lista fija: al guardar la clave se
+  consulta su catálogo, y la ventana *Claves de API* muestra los modelos
+  detectados. Si no hay detección, se ofrece el modelo actual y el motivo.
+
+### Corregido
+
+- `hu.md` afirmaba que las claves se guardan cifradas en el almacén del sistema;
+  se corrigen los criterios de HU-23: van en `settings.json` con permisos
+  restringidos, sin cifrar.
+
 ## [2.2.11] - 2026-10-15
 
 ### Corregido
