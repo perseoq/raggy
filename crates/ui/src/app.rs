@@ -1255,32 +1255,43 @@ impl RaggyApp {
 
     /// Sube archivos de código a la carpeta gestionada y la reindexa.
     fn upload_files(&mut self) {
+        let extensions = raggy_core::indexable_extensions();
         let Some(files) = rfd::FileDialog::new()
             .set_title("Sube archivos de código para analizar")
-            .add_filter("Documentos y código", raggy_core::INDEXABLE_EXTENSIONS)
+            .add_filter("Documentos y código", &extensions)
             .pick_files()
         else {
             return;
         };
 
         let uploads = self.paths.uploads_dir();
-        let imported = match raggy_core::import_files(&uploads, &files) {
-            Ok(imported) => imported,
+        let summary = match raggy_core::import_files(&uploads, &files) {
+            Ok(summary) => summary,
             Err(error) => {
                 self.status = format!("No se pudieron subir los archivos: {error}");
                 return;
             }
         };
 
-        if imported.is_empty() {
+        if summary.is_empty() {
             self.status = "No se subió ningún archivo.".to_string();
             return;
         }
 
-        self.status = format!(
+        let mut status = format!(
             "{} archivo(s) añadidos a «Archivos subidos»; indexando…",
-            imported.len()
+            summary.imported.len()
         );
+        if !summary.replaced.is_empty() {
+            status = format!(
+                "{status} {} reemplazó/reemplazaron un archivo anterior con el mismo nombre.",
+                summary.replaced.len()
+            );
+        }
+        if !summary.skipped.is_empty() {
+            status = format!("{status} {} omitido(s).", summary.skipped.len());
+        }
+        self.status = status;
         self.ensure_uploads_folder();
     }
 
@@ -1953,7 +1964,19 @@ impl RaggyApp {
                                     document.relative_path.clone(),
                                 ));
                             }
-                            ui.label(document.chunk_count.to_string());
+                            if document.chunk_count == 0 {
+                                ui.colored_label(
+                                    crate::theme::warning_color(ui.visuals().dark_mode),
+                                    "0",
+                                )
+                                .on_hover_text(
+                                    "No se extrajo texto de este archivo (puede estar \
+                                     escaneado, dañado o necesitar una herramienta). \
+                                     Revisa los avisos en Configuración.",
+                                );
+                            } else {
+                                ui.label(document.chunk_count.to_string());
+                            }
                             ui.label(document.size_bytes.to_string());
                             ui.label(short_timestamp(&document.indexed_at));
                             ui.end_row();

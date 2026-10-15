@@ -91,6 +91,9 @@ pub struct IndexSummary {
     pub warnings: Vec<String>,
 }
 
+/// Extensiones de Markdown que procesa el chunker estructural.
+pub const MARKDOWN_EXTENSIONS: &[&str] = &["md", "markdown", "mdx"];
+
 /// ¿La ruta es un documento o código que se puede indexar?
 pub fn is_indexable(path: &Path) -> bool {
     let Some(extension) = path.extension().and_then(|ext| ext.to_str()) else {
@@ -98,25 +101,14 @@ pub fn is_indexable(path: &Path) -> bool {
     };
 
     let extension = extension.to_ascii_lowercase();
-    if matches!(
-        extension.as_str(),
-        "md" | "markdown"
-            | "mdx"
-            | "txt"
-            | "csv"
-            | "docx"
-            | "xlsx"
-            | "xlsm"
-            | "xlsb"
-            | "xls"
-            | "pptx"
-            | "pdf"
-            | "doc"
-            | "ppt"
-    ) {
-        return true;
-    }
-    raggy_llm::is_code_extension(&extension)
+    is_markdown_extension(&extension)
+        || raggy_docs::DocKind::from_extension(&extension).is_some()
+        || raggy_llm::is_code_extension(&extension)
+}
+
+/// ¿La extensión corresponde a Markdown?
+fn is_markdown_extension(extension: &str) -> bool {
+    MARKDOWN_EXTENSIONS.contains(&extension)
 }
 
 /// Recorre recursivamente `root` y devuelve los archivos indexables.
@@ -191,14 +183,21 @@ fn processing_fingerprint(options: &IndexOptions) -> String {
 }
 
 /// Extensiones indexables, para los filtros de los diálogos.
-pub const INDEXABLE_EXTENSIONS: &[&str] = &[
-    "md", "markdown", "mdx", "txt", "csv", "docx", "xlsx", "xlsm", "xlsb", "xls", "pptx", "pdf",
-    "doc", "ppt", "py", "pyi", "rs", "c", "h", "cc", "cpp", "cxx", "hpp", "hh", "cs", "go", "java",
-    "kt", "kts", "js", "mjs", "jsx", "ts", "tsx", "rb", "php", "swift", "m", "mm", "scala", "lua",
-    "pl", "r", "dart", "ex", "exs", "clj", "sh", "bash", "zsh", "ps1", "sql", "json", "yaml",
-    "yml", "toml", "xml", "html", "css", "scss", "vue", "svelte", "zig", "nim", "jl", "groovy",
-    "tf", "proto", "graphql", "ini", "cfg", "conf", "asm", "sol",
-];
+///
+/// Se derivan de las mismas fuentes que [`is_indexable`] (Markdown, documentos y
+/// código) y se ordenan y deduplican, de modo que el filtro nunca se queda
+/// desincronizado del motor de indexación.
+pub fn indexable_extensions() -> Vec<&'static str> {
+    let mut extensions: Vec<&'static str> = MARKDOWN_EXTENSIONS
+        .iter()
+        .chain(raggy_docs::DOCUMENT_EXTENSIONS)
+        .chain(raggy_llm::KNOWN_EXTENSIONS)
+        .copied()
+        .collect();
+    extensions.sort_unstable();
+    extensions.dedup();
+    extensions
+}
 
 /// Incrementar cuando cambie la semántica del pipeline (extractores, chunkers,
 /// tokenización o embeddings) sin que cambien las opciones visibles. Al subirlo,
@@ -314,17 +313,16 @@ pub fn index_folder(
             .map(|chunk| embedder.embed(&embedding_text(chunk)).vector)
             .collect();
 
-        storage.replace_chunks(folder_id, &relative, &chunks, &embeddings)?;
         let document = Document::new(
             folder_id,
-            relative,
+            relative.clone(),
             content_hash,
             processing_hash.clone(),
             size_bytes,
             modified_at,
             chunks.len() as i64,
         );
-        storage.upsert_document(&document)?;
+        storage.replace_file_index(folder_id, &relative, &chunks, &embeddings, &document)?;
 
         summary.files_indexed += 1;
         summary.chunks_written += chunks.len();
@@ -389,8 +387,7 @@ fn uses_markdown_chunker(path: &Path) -> bool {
     match path.extension().and_then(|extension| extension.to_str()) {
         Some(extension) => {
             let extension = extension.to_ascii_lowercase();
-            matches!(extension.as_str(), "md" | "markdown" | "mdx")
-                || raggy_llm::is_code_extension(&extension)
+            is_markdown_extension(&extension) || raggy_llm::is_code_extension(&extension)
         }
         None => false,
     }
@@ -737,6 +734,31 @@ mod tests {
         assert!(!is_indexable(Path::new("foto.png")));
         assert!(!is_indexable(Path::new("video.mp4")));
         assert!(!is_indexable(Path::new("binario")));
+    }
+
+    #[test]
+    fn el_filtro_de_dialogos_coincide_con_el_motor_de_indexacion() {
+        let extensions = indexable_extensions();
+
+        // Todo lo que ofrece el filtro debe poder indexarse.
+        for extension in &extensions {
+            assert!(
+                is_indexable(Path::new(&format!("archivo.{extension}"))),
+                "«{extension}» está en el filtro pero no se indexa"
+            );
+        }
+
+        // Extensiones que antes se quedaban fuera del filtro y ahora sí aparecen.
+        for extension in [
+            "md", "markdown", "mdx", "pdf", "docx", "xlsx", "rs", "py", "less", "astro", "htm",
+        ] {
+            assert!(
+                extensions.contains(&extension),
+                "falta «{extension}» en el filtro de diálogos"
+            );
+        }
+
+        assert!(!extensions.contains(&"rtf"));
     }
 
     #[test]

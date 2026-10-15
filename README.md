@@ -37,7 +37,8 @@ Windows.
   bloquear indefinidamente la indexación.
 - Botón **Subir archivos** para incorporar archivos sueltos: se copian
   a una carpeta gestionada («Archivos subidos») que se indexa como una más, sin
-  tocar los originales.
+  tocar los originales. Si un archivo ya existe con el mismo nombre, se reemplaza
+  y la interfaz lo avisa en lugar de hacerlo en silencio.
 - **Chunking semántico**: respeta encabezados, listas y bloques de código (un
   bloque nunca se parte) y guarda archivo, ruta, encabezado padre y ubicación
   nativa del formato.
@@ -180,8 +181,9 @@ Todo vive en la **carpeta base** `~/.raggydesktop/`:
 ~/.raggydesktop/
 ├── settings.json     # configuración y claves de API
 ├── raggy.sqlite3     # base de datos (índices, sesiones, mensajes, artefactos)
-├── indexes/          # reservado para índices en disco
-├── artifacts/        # reservado para artefactos gestionados por la app
+├── uploads/          # archivos subidos a la carpeta gestionada
+├── artifacts/        # archivos generados registrados (se reconstruyen al restaurar)
+├── indexes/          # reservado; los vectores viven en SQLite
 └── logs/             # registros con rotación diaria
 ```
 

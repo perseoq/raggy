@@ -17,7 +17,7 @@ pub mod types;
 pub use anthropic::AnthropicProvider;
 pub use code::{
     extension_for, extract_code_blocks, is_code_extension, strip_code_blocks, suggest_filename,
-    CodeBlock,
+    CodeBlock, KNOWN_EXTENSIONS,
 };
 pub use mock::MockProvider;
 pub use openai::OpenAiCompatibleProvider;

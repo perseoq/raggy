@@ -89,7 +89,7 @@ impl Storage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Folder, FolderStatus};
+    use crate::models::{Document, Folder, FolderStatus};
 
     #[test]
     fn marcar_indexando_no_cambia_la_revision_de_la_carpeta() {
@@ -124,6 +124,46 @@ mod tests {
             after.updated_at, before,
             "al terminar sí avanza la revisión"
         );
+    }
+
+    #[test]
+    fn reemplaza_chunks_y_documento_en_una_sola_operacion() {
+        let mut storage = Storage::open_in_memory().expect("abre en memoria");
+        let folder = Folder::new("/tmp/raggy-fichero", "fichero");
+        storage.upsert_folder(&folder).expect("guarda carpeta");
+
+        let chunk = raggy_rag::Chunk {
+            id: "c1".to_string(),
+            content_hash: "h".to_string(),
+            content: "contenido".to_string(),
+            metadata: raggy_rag::ChunkMetadata {
+                source_file: "a.md".to_string(),
+                source_path: "a.md".to_string(),
+                heading: None,
+                location: None,
+                start_line: 1,
+                end_line: 1,
+            },
+        };
+        let document = Document::new(&folder.id, "a.md", "h", "p", 9, 0, 1);
+        storage
+            .replace_file_index(&folder.id, "a.md", &[chunk], &[vec![0.0; 8]], &document)
+            .expect("escribe el índice");
+
+        assert_eq!(storage.count_chunks(&folder.id).expect("cuenta"), 1);
+        let documents = storage.list_documents(&folder.id).expect("lista");
+        assert_eq!(documents.len(), 1);
+        assert_eq!(documents[0].chunk_count, 1);
+
+        // Un archivo sin texto deja el documento y sus chunks coherentes a cero.
+        let vacio = Document::new(&folder.id, "a.md", "h2", "p2", 0, 0, 0);
+        storage
+            .replace_file_index(&folder.id, "a.md", &[], &[], &vacio)
+            .expect("reemplaza");
+        assert_eq!(storage.count_chunks(&folder.id).expect("cuenta"), 0);
+        let documents = storage.list_documents(&folder.id).expect("lista");
+        assert_eq!(documents.len(), 1);
+        assert_eq!(documents[0].chunk_count, 0);
     }
 
     #[test]

@@ -23,7 +23,7 @@ pub fn is_code_extension(extension: &str) -> bool {
 }
 
 /// Extensiones que se reconocen como código al deducir nombres de archivo.
-const KNOWN_EXTENSIONS: &[&str] = &[
+pub const KNOWN_EXTENSIONS: &[&str] = &[
     "rs",
     "py",
     "js",

@@ -10,6 +10,27 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.2.4] - 2026-10-15
+
+### Corregido
+
+- **Integridad del índice**: los fragmentos de un archivo y su registro de
+  documento se escriben en una **sola transacción**, de modo que una interrupción
+  no deja un documento apuntando a un índice antiguo (ni al revés).
+- **Subidas**: si un archivo reemplaza a otro con el mismo nombre y contenido
+  distinto, la interfaz lo avisa en vez de hacerlo en silencio.
+- **Filtro de subida**: la lista de extensiones del diálogo se deriva ahora de las
+  mismas fuentes que el motor de indexación (Markdown, documentos y código), así
+  que ya no se quedan fuera tipos como `.less`, `.astro`, `.htm`, `.fish` o `.env`.
+- La tabla de archivos indexados marca en color los que quedaron con **0
+  fragmentos** (escaneados, dañados o sin herramienta), con una pista al pasar el
+  ratón.
+
+### Cambiado
+
+- `import_files` devuelve un `ImportSummary` (importados, reemplazados y
+  omitidos); `INDEXABLE_EXTENSIONS` pasa a ser `indexable_extensions()`.
+
 ## [2.2.3] - 2026-10-15
 
 ### Cambiado

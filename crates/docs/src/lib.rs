@@ -309,6 +309,13 @@ impl DocKind {
     }
 }
 
+/// Extensiones de documento que reconoce el extractor. Es la única fuente de
+/// verdad: `DocKind::from_extension` y los filtros de la interfaz se derivan de
+/// aquí para que no se desincronicen.
+pub const DOCUMENT_EXTENSIONS: &[&str] = &[
+    "txt", "csv", "xlsx", "xlsm", "xlsb", "xls", "docx", "pptx", "pdf", "doc", "ppt",
+];
+
 /// Ubicación de una sección dentro del documento original.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Location {

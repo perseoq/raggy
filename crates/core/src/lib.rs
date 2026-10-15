@@ -34,8 +34,9 @@ pub use config::{
 pub use error::{CoreError, Result};
 pub use export::{session_markdown, write_session_export};
 pub use index::{
-    index_folder, is_indexable, scan_indexable_files, IndexCommand, IndexEvent, IndexOptions,
-    IndexPhase, IndexProgress, IndexSummary, IndexWorker, INDEXABLE_EXTENSIONS,
+    index_folder, indexable_extensions, is_indexable, scan_indexable_files, IndexCommand,
+    IndexEvent, IndexOptions, IndexPhase, IndexProgress, IndexSummary, IndexWorker,
+    MARKDOWN_EXTENSIONS,
 };
 pub use ingest::tools_report;
 pub use paths::{
@@ -49,7 +50,7 @@ pub use search::{
 pub use secrets::{
     mask, resolve_key, MemoryStore, Secret, SecretError, SecretStore, SettingsStore,
 };
-pub use uploads::import_files;
+pub use uploads::{import_files, ImportSummary};
 pub use watch::FolderWatcher;
 
 /// Nombre comercial del producto.

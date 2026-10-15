@@ -231,6 +231,75 @@ impl Storage {
         Ok(())
     }
 
+    /// Reemplaza los chunks de un archivo **y** su registro de documento en una
+    /// sola transacción.
+    ///
+    /// Así no puede quedar un documento apuntando a un índice antiguo (ni al
+    /// revés) si el proceso se interrumpe a mitad de archivo.
+    pub fn replace_file_index(
+        &mut self,
+        folder_id: &str,
+        source_path: &str,
+        chunks: &[Chunk],
+        embeddings: &[Vec<f32>],
+        document: &Document,
+    ) -> Result<()> {
+        let tx = self.connection_mut().transaction()?;
+        tx.execute(
+            "DELETE FROM chunks WHERE folder_id = ?1 AND source_path = ?2",
+            params![folder_id, source_path],
+        )?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO chunks
+                     (id, folder_id, source_path, source_file, heading, location, start_line,
+                      end_line, content_hash, content, embedding)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            )?;
+            for (chunk, embedding) in chunks.iter().zip(embeddings) {
+                stmt.execute(params![
+                    chunk.id,
+                    folder_id,
+                    source_path,
+                    chunk.metadata.source_file,
+                    chunk.metadata.heading,
+                    chunk.metadata.location,
+                    chunk.metadata.start_line as i64,
+                    chunk.metadata.end_line as i64,
+                    chunk.content_hash,
+                    chunk.content,
+                    encode_vector(embedding),
+                ])?;
+            }
+        }
+        tx.execute(
+            "INSERT INTO documents
+                 (id, folder_id, relative_path, content_hash, processing_hash, size_bytes,
+                  modified_at, indexed_at, chunk_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(folder_id, relative_path) DO UPDATE SET
+                  content_hash = excluded.content_hash,
+                  processing_hash = excluded.processing_hash,
+                  size_bytes = excluded.size_bytes,
+                  modified_at = excluded.modified_at,
+                  indexed_at = excluded.indexed_at,
+                  chunk_count = excluded.chunk_count",
+            params![
+                document.id,
+                document.folder_id,
+                document.relative_path,
+                document.content_hash,
+                document.processing_hash,
+                document.size_bytes,
+                document.modified_at,
+                document.indexed_at,
+                document.chunk_count,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Cuenta los chunks de una carpeta.
     pub fn count_chunks(&self, folder_id: &str) -> Result<i64> {
         let count = self.connection().query_row(
