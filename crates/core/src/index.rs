@@ -19,7 +19,7 @@ use raggy_rag::{
     chunk_sections, Chunk, ChunkSource, Chunker, ChunkingOptions, DocumentSection,
     EmbeddingProvider, HashingEmbedding, MarkdownChunker, SectionLocation,
 };
-use raggy_storage::{Document, Folder, FolderStatus, Storage};
+use raggy_storage::{Document, Folder, FolderStatus, IndexOwner, Storage};
 
 use crate::error::{CoreError, Result};
 
@@ -322,7 +322,8 @@ pub fn index_folder(
             modified_at,
             chunks.len() as i64,
         );
-        storage.replace_file_index(folder_id, &relative, &chunks, &embeddings, &document)?;
+        let owner = IndexOwner::Folder(folder_id);
+        storage.replace_file_index(owner, &relative, &chunks, &embeddings, &document)?;
 
         summary.files_indexed += 1;
         summary.chunks_written += chunks.len();
@@ -331,8 +332,8 @@ pub fn index_folder(
     if scan_complete {
         for relative in existing.keys() {
             if !seen.contains(relative) {
-                storage.delete_chunks_for_path(folder_id, relative)?;
-                storage.delete_document(folder_id, relative)?;
+                storage.delete_chunks_for_path(IndexOwner::Folder(folder_id), relative)?;
+                storage.delete_document(IndexOwner::Folder(folder_id), relative)?;
                 summary.files_removed += 1;
             }
         }

@@ -46,6 +46,9 @@ A continuación, las tecnologías necesarias para construir este software, todas
   archivo.
 - Markdown y código usan un chunker estructural; CSV, Excel, Office y PDF pasan
   por `raggy-docs` antes de crear fragmentos con su ubicación de origen.
+- El recuperador de un chat puede fusionar los fragmentos de la carpeta con los
+  de los archivos adjuntos a la sesión (HU-34); cada resultado conserva su
+  origen (`carpeta` o `adjunto: <nombre>`) para poder compararlos.
 
 ---
 
@@ -60,6 +63,9 @@ A continuación, las tecnologías necesarias para construir este software, todas
   - Memoria del proyecto.
 - Las migraciones versionadas gestionan cambios de esquema; las consultas se
   ejecutan con una conexión SQLite por hilo de trabajo.
+- Los documentos y fragmentos pertenecen exactamente a una carpeta indexada o a
+  una sesión (archivos adjuntos), nunca a ambas; se eliminan en cascada con su
+  propietario.
 
 ---
 

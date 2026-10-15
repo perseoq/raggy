@@ -27,6 +27,10 @@ pub enum StorageError {
         /// Versión máxima soportada por este binario.
         supported: i64,
     },
+
+    /// Un documento o fragmento no tiene propietario (carpeta o sesión).
+    #[error("el registro no pertenece ni a una carpeta ni a una sesión")]
+    OwnerMissing,
 }
 
 /// Alias de resultado para la capa de almacenamiento.

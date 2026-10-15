@@ -116,11 +116,38 @@ pub fn verify_citations(answer: &str, candidates: &[Citation]) -> Vec<Citation> 
         .collect()
 }
 
+/// Origen de un fragmento dentro del contexto de un chat.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChunkOrigin {
+    /// Fragmento del índice de la carpeta del chat.
+    Folder,
+    /// Fragmento de un archivo adjunto a la sesión, con su nombre original.
+    Attachment(String),
+}
+
+impl ChunkOrigin {
+    /// ¿Procede de un archivo adjunto al chat?
+    pub fn is_attachment(&self) -> bool {
+        matches!(self, ChunkOrigin::Attachment(_))
+    }
+}
+
+impl std::fmt::Display for ChunkOrigin {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ChunkOrigin::Folder => write!(formatter, "carpeta"),
+            ChunkOrigin::Attachment(name) => write!(formatter, "adjunto: {name}"),
+        }
+    }
+}
+
 /// Fragmento recuperado junto con sus puntuaciones.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RetrievedChunk {
     /// Fragmento original.
     pub chunk: Chunk,
+    /// De dónde procede el fragmento (carpeta del chat o archivo adjunto).
+    pub origin: ChunkOrigin,
     /// Puntuación combinada usada para ordenar (en `0.0..=1.0`).
     pub score: f32,
     /// Similitud vectorial normalizada a `0.0..=1.0`.
@@ -203,6 +230,7 @@ pub struct HybridRetriever {
     vector: VectorIndex,
     lexical: Bm25Index,
     chunks: HashMap<String, Chunk>,
+    origins: HashMap<String, ChunkOrigin>,
     options: HybridRetrieverOptions,
 }
 
@@ -231,11 +259,12 @@ impl HybridRetriever {
             vector: VectorIndex::new(dimensions),
             lexical: Bm25Index::with_parameters(options.bm25),
             chunks: HashMap::new(),
+            origins: HashMap::new(),
             options,
         }
     }
 
-    /// Añade un fragmento con su embedding (opcional).
+    /// Añade un fragmento de la carpeta del chat con su embedding (opcional).
     ///
     /// Si el embedding falta o su dimensionalidad no coincide con la del
     /// proveedor, el fragmento sigue siendo recuperable por BM25.
@@ -243,6 +272,16 @@ impl HybridRetriever {
     /// La búsqueda léxica indexa además el encabezado y el nombre del archivo
     /// para que una consulta que mencione el título o el documento puntúe más.
     pub fn add(&mut self, chunk: Chunk, embedding: Option<Vec<f32>>) {
+        self.add_with_origin(chunk, embedding, ChunkOrigin::Folder);
+    }
+
+    /// Añade un fragmento indicando su origen (carpeta o adjunto al chat).
+    pub fn add_with_origin(
+        &mut self,
+        chunk: Chunk,
+        embedding: Option<Vec<f32>>,
+        origin: ChunkOrigin,
+    ) {
         let mut lexical_text = String::new();
         if let Some(heading) = &chunk.metadata.heading {
             lexical_text.push_str(heading);
@@ -252,11 +291,13 @@ impl HybridRetriever {
         lexical_text.push(' ');
         lexical_text.push_str(&chunk.content);
 
-        self.lexical.add(chunk.id.clone(), &lexical_text);
+        let id = chunk.id.clone();
+        self.lexical.add(id.clone(), &lexical_text);
         if let Some(vector) = embedding {
-            self.vector.add(chunk.id.clone(), vector);
+            self.vector.add(id.clone(), vector);
         }
-        self.chunks.insert(chunk.id.clone(), chunk);
+        self.origins.insert(id.clone(), origin);
+        self.chunks.insert(id, chunk);
     }
 
     /// Número de fragmentos indexados.
@@ -302,10 +343,16 @@ impl Retriever for HybridRetriever {
             .into_iter()
             .filter_map(|(id, (vector_score, lexical_score))| {
                 let chunk = self.chunks.get(&id)?.clone();
+                let origin = self
+                    .origins
+                    .get(&id)
+                    .cloned()
+                    .unwrap_or(ChunkOrigin::Folder);
                 let score = self.options.vector_weight * vector_score
                     + (1.0 - self.options.vector_weight) * lexical_score;
                 Some(RetrievedChunk {
                     chunk,
+                    origin,
                     score,
                     vector_score,
                     lexical_score,
@@ -515,5 +562,75 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].chunk.id, "x");
         assert_eq!(retriever.embedded_len(), 0);
+    }
+
+    #[test]
+    fn conserva_el_origen_carpeta_o_adjunto_de_cada_fragmento() {
+        let mut retriever = HybridRetriever::new(Box::new(HashingEmbedding::default()));
+
+        let folder_chunk = chunk(
+            "carpeta",
+            "politica de vacaciones veintitres dias laborables",
+        );
+        let embedding = HashingEmbedding::default()
+            .embed(&folder_chunk.content)
+            .vector;
+        retriever.add_with_origin(folder_chunk, Some(embedding), ChunkOrigin::Folder);
+
+        let mut attachment = chunk(
+            "adjunto",
+            "politica de vacaciones veintitres dias laborables",
+        );
+        attachment.metadata.source_file = "informe.pdf".to_string();
+        attachment.metadata.source_path = "informe.pdf".to_string();
+        let embedding = HashingEmbedding::default()
+            .embed(&attachment.content)
+            .vector;
+        retriever.add_with_origin(
+            attachment,
+            Some(embedding),
+            ChunkOrigin::Attachment("informe.pdf".to_string()),
+        );
+
+        let options = RetrieverOptions {
+            top_k: 5,
+            relative_floor: 0.0,
+        };
+        let results = retriever.retrieve("politica de vacaciones dias laborables", &options);
+        assert_eq!(results.len(), 2);
+
+        let attachment_result = results
+            .iter()
+            .find(|result| result.chunk.id == "adjunto")
+            .expect("recupera el adjunto");
+        assert_eq!(
+            attachment_result.origin,
+            ChunkOrigin::Attachment("informe.pdf".to_string())
+        );
+        assert!(attachment_result.origin.is_attachment());
+        assert_eq!(attachment_result.origin.to_string(), "adjunto: informe.pdf");
+
+        let folder_result = results
+            .iter()
+            .find(|result| result.chunk.id == "carpeta")
+            .expect("recupera la carpeta");
+        assert_eq!(folder_result.origin, ChunkOrigin::Folder);
+        assert!(!folder_result.origin.is_attachment());
+    }
+
+    #[test]
+    fn los_fragmentos_sin_origen_explicito_son_de_carpeta() {
+        let retriever = retriever();
+        let results = retriever.retrieve(
+            "indexación incremental de archivos",
+            &RetrieverOptions {
+                top_k: 3,
+                relative_floor: 0.1,
+            },
+        );
+        assert!(!results.is_empty());
+        assert!(results
+            .iter()
+            .all(|result| result.origin == ChunkOrigin::Folder));
     }
 }

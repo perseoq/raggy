@@ -13,4 +13,4 @@ pub mod repository;
 pub use db::Storage;
 pub use error::{Result, StorageError};
 pub use migrations::LATEST_SCHEMA_VERSION;
-pub use models::{Artifact, Document, Folder, FolderStatus, Message, Session};
+pub use models::{Artifact, Document, Folder, FolderStatus, IndexOwner, Message, Session};

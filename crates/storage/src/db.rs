@@ -89,7 +89,7 @@ impl Storage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Document, Folder, FolderStatus};
+    use crate::models::{Document, Folder, FolderStatus, IndexOwner, Session};
 
     #[test]
     fn marcar_indexando_no_cambia_la_revision_de_la_carpeta() {
@@ -147,7 +147,13 @@ mod tests {
         };
         let document = Document::new(&folder.id, "a.md", "h", "p", 9, 0, 1);
         storage
-            .replace_file_index(&folder.id, "a.md", &[chunk], &[vec![0.0; 8]], &document)
+            .replace_file_index(
+                IndexOwner::Folder(&folder.id),
+                "a.md",
+                &[chunk],
+                &[vec![0.0; 8]],
+                &document,
+            )
             .expect("escribe el índice");
 
         assert_eq!(storage.count_chunks(&folder.id).expect("cuenta"), 1);
@@ -158,7 +164,7 @@ mod tests {
         // Un archivo sin texto deja el documento y sus chunks coherentes a cero.
         let vacio = Document::new(&folder.id, "a.md", "h2", "p2", 0, 0, 0);
         storage
-            .replace_file_index(&folder.id, "a.md", &[], &[], &vacio)
+            .replace_file_index(IndexOwner::Folder(&folder.id), "a.md", &[], &[], &vacio)
             .expect("reemplaza");
         assert_eq!(storage.count_chunks(&folder.id).expect("cuenta"), 0);
         let documents = storage.list_documents(&folder.id).expect("lista");
@@ -293,5 +299,223 @@ mod tests {
             .remove(0);
         assert!(!message.anchored);
         assert!(message.citations.is_empty());
+    }
+
+    fn fragmento(id: &str, content: &str) -> raggy_rag::Chunk {
+        raggy_rag::Chunk {
+            id: id.to_string(),
+            content_hash: id.to_string(),
+            content: content.to_string(),
+            metadata: raggy_rag::ChunkMetadata {
+                source_file: "informe.pdf".to_string(),
+                source_path: "informe.pdf".to_string(),
+                heading: None,
+                location: None,
+                start_line: 1,
+                end_line: 1,
+            },
+        }
+    }
+
+    #[test]
+    fn la_migracion_de_adjuntos_conserva_los_datos_existentes() {
+        // Se reconstruye la base de datos hasta la versión 8 y se comprueba que
+        // la migración a la 9 conserva carpetas, documentos y fragmentos.
+        let mut conn = Connection::open_in_memory().expect("abre en memoria");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("activa claves foráneas");
+        for migration in migrations::MIGRATIONS.iter().filter(|m| m.version <= 8) {
+            let tx = conn.transaction().expect("abre transacción");
+            tx.execute_batch(migration.sql)
+                .expect("aplica migración antigua");
+            tx.pragma_update(None, "user_version", migration.version)
+                .expect("marca la versión");
+            tx.commit().expect("confirma la migración");
+        }
+        conn.execute(
+            "INSERT INTO folders (id, path, name, status, file_count, created_at, updated_at)
+             VALUES ('f1', '/tmp/legacy', 'legacy', 'indexed', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .expect("inserta carpeta");
+        conn.execute(
+            "INSERT INTO chunks (id, folder_id, source_path, source_file, start_line, end_line, content_hash, content)
+             VALUES ('c1', 'f1', 'a.md', 'a.md', 1, 3, 'h', 'texto heredado')",
+            [],
+        )
+        .expect("inserta fragmento");
+        conn.execute(
+            "INSERT INTO documents (id, folder_id, relative_path, content_hash, size_bytes, modified_at, indexed_at, chunk_count)
+             VALUES ('d1', 'f1', 'a.md', 'h', 13, 0, '2026-01-01T00:00:00Z', 1)",
+            [],
+        )
+        .expect("inserta documento");
+
+        let version = migrations::apply(&mut conn).expect("aplica las migraciones pendientes");
+        assert_eq!(version, migrations::LATEST_SCHEMA_VERSION);
+
+        let chunks: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM chunks WHERE folder_id = 'f1' AND session_id IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .expect("cuenta fragmentos");
+        assert_eq!(
+            chunks, 1,
+            "los fragmentos existentes se conservan sin sesión"
+        );
+        let documents: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM documents WHERE folder_id = 'f1' AND session_id IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .expect("cuenta documentos");
+        assert_eq!(documents, 1, "los documentos existentes se conservan");
+    }
+
+    #[test]
+    fn un_registro_debe_pertenecer_a_una_carpeta_o_a_una_sesion() {
+        let storage = Storage::open_in_memory().expect("abre en memoria");
+        let conn = storage.connection();
+        conn.execute(
+            "INSERT INTO folders (id, path, name, status, file_count, created_at, updated_at)
+             VALUES ('f1', '/tmp/propietario', 'propietario', 'indexed', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .expect("inserta carpeta");
+        conn.execute(
+            "INSERT INTO sessions (id, folder_id, title, provider, model, created_at, updated_at)
+             VALUES ('s1', 'f1', 't', 'deepseek', 'm', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .expect("inserta sesión");
+
+        // Sin propietario: se rechaza.
+        assert!(
+            conn.execute(
+                "INSERT INTO chunks (id, source_path, source_file, start_line, end_line, content_hash, content)
+                 VALUES ('c0', 'a.md', 'a.md', 1, 1, 'h', 'x')",
+                [],
+            )
+            .is_err(),
+            "un fragmento sin propietario no debe admitirse"
+        );
+
+        // Con los dos propietarios: también se rechaza.
+        assert!(
+            conn.execute(
+                "INSERT INTO chunks (id, folder_id, session_id, source_path, source_file, start_line, end_line, content_hash, content)
+                 VALUES ('c2', 'f1', 's1', 'a.md', 'a.md', 1, 1, 'h', 'x')",
+                [],
+            )
+            .is_err(),
+            "un fragmento no puede tener dos propietarios"
+        );
+
+        // Con uno solo: se admite.
+        conn.execute(
+            "INSERT INTO chunks (id, session_id, source_path, source_file, start_line, end_line, content_hash, content)
+             VALUES ('c3', 's1', 'informe.pdf', 'informe.pdf', 1, 1, 'h', 'x')",
+            [],
+        )
+        .expect("un adjunto con un solo propietario es válido");
+    }
+
+    #[test]
+    fn guarda_adjuntos_y_los_elimina_en_cascada_con_la_sesion() {
+        let mut storage = Storage::open_in_memory().expect("abre en memoria");
+        let folder = Folder::new("/tmp/cascada", "cascada");
+        storage.upsert_folder(&folder).expect("guarda carpeta");
+        let session = Session::new(&folder.id, "deepseek", "deepseek-chat");
+        storage.upsert_session(&session).expect("guarda sesión");
+
+        let document = Document::for_session(&session.id, "informe.pdf", "h", "p", 10, 0, 1);
+        storage
+            .replace_file_index(
+                IndexOwner::Session(&session.id),
+                "informe.pdf",
+                &[fragmento("c1", "contenido del adjunto")],
+                &[vec![0.0; 8]],
+                &document,
+            )
+            .expect("guarda el adjunto");
+
+        let adjuntos = storage.list_session_documents(&session.id).expect("lista");
+        assert_eq!(adjuntos.len(), 1);
+        assert_eq!(adjuntos[0].session_id.as_deref(), Some(session.id.as_str()));
+        assert!(
+            storage
+                .list_embedded_chunks_for_session(&session.id)
+                .expect("fragmentos")
+                .len()
+                == 1
+        );
+        assert!(storage
+            .session_index_revision(&session.id)
+            .expect("revisión")
+            .starts_with('1'));
+
+        storage.delete_session(&session.id).expect("borra sesión");
+        assert!(storage
+            .list_session_documents(&session.id)
+            .expect("lista")
+            .is_empty());
+        let chunks: i64 = storage
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM chunks WHERE session_id = ?1",
+                [&session.id],
+                |row| row.get(0),
+            )
+            .expect("cuenta fragmentos");
+        assert_eq!(chunks, 0, "los fragmentos se borran en cascada");
+    }
+
+    #[test]
+    fn quitar_los_adjuntos_de_una_sesion_no_toca_la_carpeta() {
+        let mut storage = Storage::open_in_memory().expect("abre en memoria");
+        let folder = Folder::new("/tmp/adjuntos", "adjuntos");
+        storage.upsert_folder(&folder).expect("guarda carpeta");
+        let session = Session::new(&folder.id, "deepseek", "deepseek-chat");
+        storage.upsert_session(&session).expect("guarda sesión");
+
+        storage
+            .replace_file_index(
+                IndexOwner::Folder(&folder.id),
+                "guia.md",
+                &[fragmento("carpeta", "índice de la carpeta")],
+                &[vec![0.0; 8]],
+                &Document::new(&folder.id, "guia.md", "h", "p", 10, 0, 1),
+            )
+            .expect("guarda la carpeta");
+        storage
+            .replace_file_index(
+                IndexOwner::Session(&session.id),
+                "informe.pdf",
+                &[fragmento("adjunto", "índice del adjunto")],
+                &[vec![0.0; 8]],
+                &Document::for_session(&session.id, "informe.pdf", "h", "p", 10, 0, 1),
+            )
+            .expect("guarda el adjunto");
+
+        storage
+            .delete_session_index(&session.id)
+            .expect("quita los adjuntos");
+
+        assert!(storage
+            .list_session_documents(&session.id)
+            .expect("adjuntos")
+            .is_empty());
+        assert_eq!(
+            storage
+                .list_documents(&folder.id)
+                .expect("documentos")
+                .len(),
+            1,
+            "el índice de la carpeta no se altera"
+        );
+        assert_eq!(storage.count_chunks(&folder.id).expect("cuenta"), 1);
     }
 }

@@ -166,14 +166,57 @@ impl Message {
     }
 }
 
-/// Archivo indexable rastreado dentro de una carpeta (HU-02, HU-03).
+/// Propietario de los fragmentos y documentos: la carpeta indexada de un chat o
+/// la propia sesión (archivos adjuntos al chat).
+///
+/// Un registro pertenece exactamente a uno de los dos, lo que mantiene aisladas
+/// las sesiones entre sí y respecto al índice de la carpeta (HU-06).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IndexOwner<'a> {
+    /// Carpeta indexada del chat.
+    Folder(&'a str),
+    /// Sesión de chat que contiene archivos adjuntos.
+    Session(&'a str),
+}
+
+impl<'a> IndexOwner<'a> {
+    /// Columna de la base de datos que identifica al propietario.
+    pub fn column(self) -> &'static str {
+        match self {
+            IndexOwner::Folder(_) => "folder_id",
+            IndexOwner::Session(_) => "session_id",
+        }
+    }
+
+    /// Identificador del propietario.
+    pub fn id(self) -> &'a str {
+        match self {
+            IndexOwner::Folder(id) | IndexOwner::Session(id) => id,
+        }
+    }
+
+    /// Carpeta a la que pertenece, si el propietario es una carpeta.
+    pub fn folder_id(self) -> Option<&'a str> {
+        match self {
+            IndexOwner::Folder(id) => Some(id),
+            IndexOwner::Session(_) => None,
+        }
+    }
+}
+
+/// Archivo indexable rastreado dentro de una carpeta o adjunto a una sesión
+/// (HU-02, HU-03).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Document {
     /// Identificador único.
     pub id: String,
-    /// Carpeta a la que pertenece.
-    pub folder_id: String,
-    /// Ruta relativa a la raíz de la carpeta.
+    /// Carpeta a la que pertenece, si procede del índice de una carpeta.
+    #[serde(default)]
+    pub folder_id: Option<String>,
+    /// Sesión a la que pertenece, si es un archivo adjunto al chat.
+    #[serde(default)]
+    pub session_id: Option<String>,
+    /// Ruta relativa a la raíz de la carpeta (o nombre del adjunto).
     pub relative_path: String,
     /// Hash del contenido completo del archivo.
     pub content_hash: String,
@@ -190,7 +233,7 @@ pub struct Document {
 }
 
 impl Document {
-    /// Crea el registro de un documento recién indexado.
+    /// Crea el registro de un documento indexado dentro de una carpeta.
     pub fn new(
         folder_id: impl Into<String>,
         relative_path: impl Into<String>,
@@ -202,7 +245,8 @@ impl Document {
     ) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
-            folder_id: folder_id.into(),
+            folder_id: Some(folder_id.into()),
+            session_id: None,
             relative_path: relative_path.into(),
             content_hash: content_hash.into(),
             processing_hash: processing_hash.into(),
@@ -210,6 +254,39 @@ impl Document {
             modified_at,
             indexed_at: chrono::Utc::now().to_rfc3339(),
             chunk_count,
+        }
+    }
+
+    /// Crea el registro de un archivo adjunto a una sesión de chat.
+    pub fn for_session(
+        session_id: impl Into<String>,
+        relative_path: impl Into<String>,
+        content_hash: impl Into<String>,
+        processing_hash: impl Into<String>,
+        size_bytes: i64,
+        modified_at: i64,
+        chunk_count: i64,
+    ) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            folder_id: None,
+            session_id: Some(session_id.into()),
+            relative_path: relative_path.into(),
+            content_hash: content_hash.into(),
+            processing_hash: processing_hash.into(),
+            size_bytes,
+            modified_at,
+            indexed_at: chrono::Utc::now().to_rfc3339(),
+            chunk_count,
+        }
+    }
+
+    /// Propietario del documento, si tiene uno.
+    pub fn owner(&self) -> Option<IndexOwner<'_>> {
+        match (self.folder_id.as_deref(), self.session_id.as_deref()) {
+            (Some(folder_id), None) => Some(IndexOwner::Folder(folder_id)),
+            (None, Some(session_id)) => Some(IndexOwner::Session(session_id)),
+            _ => None,
         }
     }
 }
@@ -335,5 +412,31 @@ mod tests {
         );
         assert!(!user.anchored);
         assert!(user.citations.is_empty());
+    }
+
+    #[test]
+    fn un_documento_pertenece_a_una_carpeta_o_a_una_sesion() {
+        let folder_document = Document::new("f1", "a.md", "h", "p", 4, 0, 1);
+        assert_eq!(folder_document.owner(), Some(IndexOwner::Folder("f1")));
+        assert_eq!(folder_document.session_id, None);
+
+        let attachment = Document::for_session("s1", "informe.pdf", "h", "p", 9, 0, 2);
+        assert_eq!(attachment.owner(), Some(IndexOwner::Session("s1")));
+        assert_eq!(attachment.folder_id, None);
+
+        let mut corrupt = folder_document.clone();
+        corrupt.session_id = Some("s1".to_string());
+        assert_eq!(corrupt.owner(), None, "no puede pertenecer a los dos");
+    }
+
+    #[test]
+    fn el_propietario_indica_su_columna_y_su_id() {
+        assert_eq!(IndexOwner::Folder("f1").column(), "folder_id");
+        assert_eq!(IndexOwner::Folder("f1").id(), "f1");
+        assert_eq!(IndexOwner::Folder("f1").folder_id(), Some("f1"));
+
+        assert_eq!(IndexOwner::Session("s1").column(), "session_id");
+        assert_eq!(IndexOwner::Session("s1").id(), "s1");
+        assert_eq!(IndexOwner::Session("s1").folder_id(), None);
     }
 }

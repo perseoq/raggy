@@ -61,10 +61,15 @@ pub const MIGRATIONS: &[Migration] = &[
         description: "huella del pipeline de extracción y opciones por documento",
         sql: include_str!("../migrations/0008_document_processing_hash.sql"),
     },
+    Migration {
+        version: 9,
+        description: "fragmentos y documentos adjuntos a una sesión de chat",
+        sql: include_str!("../migrations/0009_session_attachments.sql"),
+    },
 ];
 
 /// Versión de esquema que espera este binario.
-pub const LATEST_SCHEMA_VERSION: i64 = 8;
+pub const LATEST_SCHEMA_VERSION: i64 = 9;
 
 /// Aplica todas las migraciones pendientes dentro de una transacción.
 pub fn apply(conn: &mut Connection) -> Result<i64> {

@@ -44,8 +44,10 @@ pub use paths::{
 };
 pub use raggy_docs::limits as ingest_limits;
 pub use raggy_docs::ExtractOptions;
+pub use raggy_rag::ChunkOrigin;
 pub use search::{
-    build_retriever, embedding_coverage, search_folder, EmbeddingCoverage, SearchCache,
+    build_chat_retriever, build_retriever, embedding_coverage, search_folder, EmbeddingCoverage,
+    SearchCache,
 };
 pub use secrets::{
     mask, resolve_key, MemoryStore, Secret, SecretError, SecretStore, SettingsStore,

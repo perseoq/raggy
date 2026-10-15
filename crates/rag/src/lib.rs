@@ -29,9 +29,10 @@ pub use embedding::{
 };
 pub use markdown::MarkdownChunker;
 pub use retriever::{
-    verify_citations, Citation, HybridRetriever, HybridRetrieverOptions, RetrievedChunk, Retriever,
-    RetrieverOptions, DEFAULT_CANDIDATE_MULTIPLIER, DEFAULT_RELATIVE_FLOOR, DEFAULT_TOP_K,
-    DEFAULT_VECTOR_WEIGHT, MIN_ABSOLUTE_SCORE, MIN_CANDIDATE_POOL,
+    verify_citations, ChunkOrigin, Citation, HybridRetriever, HybridRetrieverOptions,
+    RetrievedChunk, Retriever, RetrieverOptions, DEFAULT_CANDIDATE_MULTIPLIER,
+    DEFAULT_RELATIVE_FLOOR, DEFAULT_TOP_K, DEFAULT_VECTOR_WEIGHT, MIN_ABSOLUTE_SCORE,
+    MIN_CANDIDATE_POOL,
 };
 pub use section::{chunk_sections, DocumentSection, SectionLocation};
 pub use stopwords::is_stopword;

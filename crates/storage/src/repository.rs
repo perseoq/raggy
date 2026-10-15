@@ -1,11 +1,11 @@
 //! Consultas y mutaciones sobre SQLite para las entidades del dominio.
 
-use rusqlite::{params, OptionalExtension, Row};
+use rusqlite::{params, OptionalExtension, Row, Transaction};
 
 use raggy_rag::Chunk;
 
 use crate::error::Result;
-use crate::models::{Artifact, Document, Folder, FolderStatus, Message, Session};
+use crate::models::{Artifact, Document, Folder, FolderStatus, IndexOwner, Message, Session};
 use crate::Storage;
 
 impl Storage {
@@ -114,14 +114,23 @@ impl Storage {
 
     // ---------------------------------------------------------------- documentos
 
-    /// Lista los documentos de una carpeta.
+    /// Lista los documentos indexados de una carpeta.
     pub fn list_documents(&self, folder_id: &str) -> Result<Vec<Document>> {
-        let mut stmt = self.connection().prepare(
-            "SELECT id, folder_id, relative_path, content_hash, processing_hash, size_bytes,
-                    modified_at, indexed_at, chunk_count
-             FROM documents WHERE folder_id = ?1 ORDER BY relative_path ASC",
-        )?;
+        let mut stmt = self.connection().prepare(&format!(
+            "SELECT {DOCUMENT_COLUMNS} FROM documents
+             WHERE folder_id = ?1 ORDER BY relative_path ASC"
+        ))?;
         let rows = stmt.query_map([folder_id], row_to_document)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Lista los archivos adjuntos de una sesión, ordenados por nombre.
+    pub fn list_session_documents(&self, session_id: &str) -> Result<Vec<Document>> {
+        let mut stmt = self.connection().prepare(&format!(
+            "SELECT {DOCUMENT_COLUMNS} FROM documents
+             WHERE session_id = ?1 ORDER BY relative_path ASC"
+        ))?;
+        let rows = stmt.query_map([session_id], row_to_document)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
@@ -130,9 +139,10 @@ impl Storage {
         let document = self
             .connection()
             .query_row(
-                "SELECT id, folder_id, relative_path, content_hash, processing_hash, size_bytes,
-                        modified_at, indexed_at, chunk_count
-                 FROM documents WHERE folder_id = ?1 AND relative_path = ?2",
+                &format!(
+                    "SELECT {DOCUMENT_COLUMNS} FROM documents
+                     WHERE folder_id = ?1 AND relative_path = ?2"
+                ),
                 params![folder_id, relative_path],
                 row_to_document,
             )
@@ -141,22 +151,33 @@ impl Storage {
     }
 
     /// Inserta o actualiza el registro de un documento.
+    ///
+    /// La sentencia de conflicto depende del propietario: los documentos de
+    /// carpeta usan `UNIQUE (folder_id, relative_path)` y los adjuntos el índice
+    /// único parcial sobre `(session_id, relative_path)`.
     pub fn upsert_document(&self, document: &Document) -> Result<()> {
+        let owner = document
+            .owner()
+            .ok_or(crate::error::StorageError::OwnerMissing)?;
+        let column = owner.column();
+        let conflict = document_conflict_clause(owner);
         self.connection().execute(
-            "INSERT INTO documents
-                 (id, folder_id, relative_path, content_hash, processing_hash, size_bytes,
-                  modified_at, indexed_at, chunk_count)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-             ON CONFLICT(folder_id, relative_path) DO UPDATE SET
-                  content_hash = excluded.content_hash,
-                  processing_hash = excluded.processing_hash,
-                  size_bytes = excluded.size_bytes,
-                 modified_at = excluded.modified_at,
-                 indexed_at = excluded.indexed_at,
-                 chunk_count = excluded.chunk_count",
+            &format!(
+                "INSERT INTO documents
+                     (id, {column}, relative_path, content_hash, processing_hash, size_bytes,
+                      modified_at, indexed_at, chunk_count)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 {conflict} DO UPDATE SET
+                      content_hash = excluded.content_hash,
+                      processing_hash = excluded.processing_hash,
+                      size_bytes = excluded.size_bytes,
+                      modified_at = excluded.modified_at,
+                      indexed_at = excluded.indexed_at,
+                      chunk_count = excluded.chunk_count"
+            ),
             params![
                 document.id,
-                document.folder_id,
+                owner.id(),
                 document.relative_path,
                 document.content_hash,
                 document.processing_hash,
@@ -170,21 +191,50 @@ impl Storage {
     }
 
     /// Elimina el registro de un documento (sin tocar los chunks).
-    pub fn delete_document(&self, folder_id: &str, relative_path: &str) -> Result<()> {
+    pub fn delete_document(&self, owner: IndexOwner<'_>, relative_path: &str) -> Result<()> {
         self.connection().execute(
-            "DELETE FROM documents WHERE folder_id = ?1 AND relative_path = ?2",
-            params![folder_id, relative_path],
+            &format!(
+                "DELETE FROM documents WHERE {} = ?1 AND relative_path = ?2",
+                owner.column()
+            ),
+            params![owner.id(), relative_path],
         )?;
         Ok(())
+    }
+
+    /// Elimina los documentos y fragmentos de todos los adjuntos de una sesión.
+    pub fn delete_session_index(&mut self, session_id: &str) -> Result<()> {
+        let tx = self.connection_mut().transaction()?;
+        tx.execute("DELETE FROM chunks WHERE session_id = ?1", [session_id])?;
+        tx.execute("DELETE FROM documents WHERE session_id = ?1", [session_id])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Revisión barata de los adjuntos de una sesión.
+    ///
+    /// Combina el número de documentos con la última fecha de indexación para
+    /// que la caché de búsqueda se reconstruya al adjuntar o quitar archivos.
+    pub fn session_index_revision(&self, session_id: &str) -> Result<String> {
+        let revision = self.connection().query_row(
+            "SELECT COUNT(*) || ':' || COALESCE(MAX(indexed_at), '')
+             FROM documents WHERE session_id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )?;
+        Ok(revision)
     }
 
     // -------------------------------------------------------------------- chunks
 
     /// Borra los chunks asociados a un archivo.
-    pub fn delete_chunks_for_path(&self, folder_id: &str, source_path: &str) -> Result<()> {
+    pub fn delete_chunks_for_path(&self, owner: IndexOwner<'_>, source_path: &str) -> Result<()> {
         self.connection().execute(
-            "DELETE FROM chunks WHERE folder_id = ?1 AND source_path = ?2",
-            params![folder_id, source_path],
+            &format!(
+                "DELETE FROM chunks WHERE {} = ?1 AND source_path = ?2",
+                owner.column()
+            ),
+            params![owner.id(), source_path],
         )?;
         Ok(())
     }
@@ -194,39 +244,13 @@ impl Storage {
     /// `embeddings` debe tener la misma longitud que `chunks`.
     pub fn replace_chunks(
         &mut self,
-        folder_id: &str,
+        owner: IndexOwner<'_>,
         source_path: &str,
         chunks: &[Chunk],
         embeddings: &[Vec<f32>],
     ) -> Result<()> {
         let tx = self.connection_mut().transaction()?;
-        tx.execute(
-            "DELETE FROM chunks WHERE folder_id = ?1 AND source_path = ?2",
-            params![folder_id, source_path],
-        )?;
-        {
-            let mut stmt = tx.prepare(
-                "INSERT INTO chunks
-                     (id, folder_id, source_path, source_file, heading, location, start_line,
-                      end_line, content_hash, content, embedding)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            )?;
-            for (chunk, embedding) in chunks.iter().zip(embeddings) {
-                stmt.execute(params![
-                    chunk.id,
-                    folder_id,
-                    source_path,
-                    chunk.metadata.source_file,
-                    chunk.metadata.heading,
-                    chunk.metadata.location,
-                    chunk.metadata.start_line as i64,
-                    chunk.metadata.end_line as i64,
-                    chunk.content_hash,
-                    chunk.content,
-                    encode_vector(embedding),
-                ])?;
-            }
-        }
+        write_chunks(&tx, owner, source_path, chunks, embeddings)?;
         tx.commit()?;
         Ok(())
     }
@@ -238,64 +262,15 @@ impl Storage {
     /// revés) si el proceso se interrumpe a mitad de archivo.
     pub fn replace_file_index(
         &mut self,
-        folder_id: &str,
+        owner: IndexOwner<'_>,
         source_path: &str,
         chunks: &[Chunk],
         embeddings: &[Vec<f32>],
         document: &Document,
     ) -> Result<()> {
         let tx = self.connection_mut().transaction()?;
-        tx.execute(
-            "DELETE FROM chunks WHERE folder_id = ?1 AND source_path = ?2",
-            params![folder_id, source_path],
-        )?;
-        {
-            let mut stmt = tx.prepare(
-                "INSERT INTO chunks
-                     (id, folder_id, source_path, source_file, heading, location, start_line,
-                      end_line, content_hash, content, embedding)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            )?;
-            for (chunk, embedding) in chunks.iter().zip(embeddings) {
-                stmt.execute(params![
-                    chunk.id,
-                    folder_id,
-                    source_path,
-                    chunk.metadata.source_file,
-                    chunk.metadata.heading,
-                    chunk.metadata.location,
-                    chunk.metadata.start_line as i64,
-                    chunk.metadata.end_line as i64,
-                    chunk.content_hash,
-                    chunk.content,
-                    encode_vector(embedding),
-                ])?;
-            }
-        }
-        tx.execute(
-            "INSERT INTO documents
-                 (id, folder_id, relative_path, content_hash, processing_hash, size_bytes,
-                  modified_at, indexed_at, chunk_count)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-             ON CONFLICT(folder_id, relative_path) DO UPDATE SET
-                  content_hash = excluded.content_hash,
-                  processing_hash = excluded.processing_hash,
-                  size_bytes = excluded.size_bytes,
-                  modified_at = excluded.modified_at,
-                  indexed_at = excluded.indexed_at,
-                  chunk_count = excluded.chunk_count",
-            params![
-                document.id,
-                document.folder_id,
-                document.relative_path,
-                document.content_hash,
-                document.processing_hash,
-                document.size_bytes,
-                document.modified_at,
-                document.indexed_at,
-                document.chunk_count,
-            ],
-        )?;
+        write_chunks(&tx, owner, source_path, chunks, embeddings)?;
+        write_document(&tx, owner, document)?;
         tx.commit()?;
         Ok(())
     }
@@ -337,30 +312,29 @@ impl Storage {
 
     /// Recupera todos los chunks de una carpeta con su embedding (si lo hay).
     pub fn list_embedded_chunks(&self, folder_id: &str) -> Result<Vec<(Chunk, Option<Vec<f32>>)>> {
-        let mut stmt = self.connection().prepare(
+        self.list_embedded_chunks_owned("folder_id", folder_id)
+    }
+
+    /// Recupera todos los chunks adjuntos a una sesión con su embedding.
+    pub fn list_embedded_chunks_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<(Chunk, Option<Vec<f32>>)>> {
+        self.list_embedded_chunks_owned("session_id", session_id)
+    }
+
+    /// Implementación común de las consultas de fragmentos por propietario.
+    fn list_embedded_chunks_owned(
+        &self,
+        column: &str,
+        id: &str,
+    ) -> Result<Vec<(Chunk, Option<Vec<f32>>)>> {
+        let mut stmt = self.connection().prepare(&format!(
             "SELECT id, source_path, source_file, heading, location, start_line, end_line,
                     content_hash, content, embedding
-             FROM chunks WHERE folder_id = ?1 ORDER BY source_path ASC, start_line ASC",
-        )?;
-        let rows = stmt.query_map([folder_id], |row| {
-            let blob: Option<Vec<u8>> = row.get(9)?;
-            Ok((
-                Chunk {
-                    id: row.get(0)?,
-                    content_hash: row.get(7)?,
-                    content: row.get(8)?,
-                    metadata: raggy_rag::ChunkMetadata {
-                        source_path: row.get(1)?,
-                        source_file: row.get(2)?,
-                        heading: row.get(3)?,
-                        location: row.get(4)?,
-                        start_line: row.get::<_, i64>(5)? as usize,
-                        end_line: row.get::<_, i64>(6)? as usize,
-                    },
-                },
-                blob.map(decode_vector),
-            ))
-        })?;
+             FROM chunks WHERE {column} = ?1 ORDER BY source_path ASC, start_line ASC"
+        ))?;
+        let rows = stmt.query_map([id], row_to_embedded_chunk)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
@@ -669,14 +643,120 @@ fn row_to_document(row: &Row<'_>) -> rusqlite::Result<Document> {
     Ok(Document {
         id: row.get(0)?,
         folder_id: row.get(1)?,
-        relative_path: row.get(2)?,
-        content_hash: row.get(3)?,
-        processing_hash: row.get(4)?,
-        size_bytes: row.get(5)?,
-        modified_at: row.get(6)?,
-        indexed_at: row.get(7)?,
-        chunk_count: row.get(8)?,
+        session_id: row.get(2)?,
+        relative_path: row.get(3)?,
+        content_hash: row.get(4)?,
+        processing_hash: row.get(5)?,
+        size_bytes: row.get(6)?,
+        modified_at: row.get(7)?,
+        indexed_at: row.get(8)?,
+        chunk_count: row.get(9)?,
     })
+}
+
+fn row_to_embedded_chunk(row: &Row<'_>) -> rusqlite::Result<(Chunk, Option<Vec<f32>>)> {
+    let blob: Option<Vec<u8>> = row.get(9)?;
+    Ok((
+        Chunk {
+            id: row.get(0)?,
+            content_hash: row.get(7)?,
+            content: row.get(8)?,
+            metadata: raggy_rag::ChunkMetadata {
+                source_path: row.get(1)?,
+                source_file: row.get(2)?,
+                heading: row.get(3)?,
+                location: row.get(4)?,
+                start_line: row.get::<_, i64>(5)? as usize,
+                end_line: row.get::<_, i64>(6)? as usize,
+            },
+        },
+        blob.map(decode_vector),
+    ))
+}
+
+/// Columnas que reconstruyen un [`Document`], en el orden de [`row_to_document`].
+const DOCUMENT_COLUMNS: &str =
+    "id, folder_id, session_id, relative_path, content_hash, processing_hash, size_bytes, \
+     modified_at, indexed_at, chunk_count";
+
+/// Cláusula de conflicto del upsert de documentos según su propietario.
+fn document_conflict_clause(owner: IndexOwner<'_>) -> &'static str {
+    match owner {
+        IndexOwner::Folder(_) => "ON CONFLICT(folder_id, relative_path)",
+        IndexOwner::Session(_) => {
+            "ON CONFLICT(session_id, relative_path) WHERE session_id IS NOT NULL"
+        }
+    }
+}
+
+/// Sustituye los fragmentos de un archivo dentro de la transacción.
+fn write_chunks(
+    tx: &Transaction<'_>,
+    owner: IndexOwner<'_>,
+    source_path: &str,
+    chunks: &[Chunk],
+    embeddings: &[Vec<f32>],
+) -> Result<()> {
+    let column = owner.column();
+    tx.execute(
+        &format!("DELETE FROM chunks WHERE {column} = ?1 AND source_path = ?2"),
+        params![owner.id(), source_path],
+    )?;
+    let mut stmt = tx.prepare(&format!(
+        "INSERT INTO chunks
+             (id, {column}, source_path, source_file, heading, location, start_line,
+              end_line, content_hash, content, embedding)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"
+    ))?;
+    for (chunk, embedding) in chunks.iter().zip(embeddings) {
+        stmt.execute(params![
+            chunk.id,
+            owner.id(),
+            source_path,
+            chunk.metadata.source_file,
+            chunk.metadata.heading,
+            chunk.metadata.location,
+            chunk.metadata.start_line as i64,
+            chunk.metadata.end_line as i64,
+            chunk.content_hash,
+            chunk.content,
+            encode_vector(embedding),
+        ])?;
+    }
+    Ok(())
+}
+
+/// Inserta o actualiza el registro del documento dentro de la transacción.
+fn write_document(tx: &Transaction<'_>, owner: IndexOwner<'_>, document: &Document) -> Result<()> {
+    let column = owner.column();
+    let conflict = document_conflict_clause(owner);
+    tx.execute(
+        &format!(
+            "INSERT INTO documents
+                 (id, {column}, relative_path, content_hash, processing_hash, size_bytes,
+                  modified_at, indexed_at, chunk_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             {conflict} DO UPDATE SET
+                  content_hash = excluded.content_hash,
+                  processing_hash = excluded.processing_hash,
+                  size_bytes = excluded.size_bytes,
+                  modified_at = excluded.modified_at,
+                  indexed_at = excluded.indexed_at,
+                  chunk_count = excluded.chunk_count"
+        ),
+        params![
+            document.id,
+            owner.id(),
+            document.relative_path,
+            document.content_hash,
+            document.processing_hash,
+            document.size_bytes,
+            document.modified_at,
+            document.indexed_at,
+            document.chunk_count,
+        ],
+    )?;
+    Ok(())
 }
 
 fn now_rfc3339() -> String {

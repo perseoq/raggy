@@ -10,6 +10,23 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+### Añadido
+
+- **Fase 5a de 5b — archivos adjuntos al chat (infraestructura)**: los fragmentos
+  y documentos pueden pertenecer a la carpeta de un chat o a la propia sesión
+  (archivos adjuntos), nunca a ambos. La migración de esquema 9 añade
+  `session_id`, la restricción de propietario único y el borrado en cascada.
+- El recuperador de chat fusiona los fragmentos de la carpeta con los de los
+  adjuntos de la sesión y conserva el origen de cada uno (`carpeta` o
+  `adjunto: <nombre>`), con las sesiones aisladas entre sí (HU-06, HU-34).
+- La caché de búsqueda se renueva al adjuntar o quitar archivos de una sesión, y
+  hay un método para borrar todos los adjuntos de una sesión.
+
+### Cambiado
+
+- `Document` distingue `folder_id` y `session_id`, y el repositorio escribe
+  documentos y fragmentos mediante un `IndexOwner` (carpeta o sesión).
+
 ## [2.2.4] - 2026-10-15
 
 ### Corregido

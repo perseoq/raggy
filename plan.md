@@ -68,6 +68,8 @@ Software de escritorio con interfaz gráfica moderna, escrito en Rust, que funci
 - Múltiples sesiones de chat por carpeta.
 - Historial persistente, reanudable y exportable.
 - Contexto de sesión limitado a la carpeta asociada (aislamiento estricto).
+- Archivos adjuntos por sesión (HU-34): se añaden uno o varios archivos al chat
+  y su contenido se busca junto con el de la carpeta, distinguiendo el origen.
 
 ### 5.3 Motor RAG
 - Recuperación de top-K fragmentos relevantes por consulta.

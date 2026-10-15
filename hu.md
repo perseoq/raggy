@@ -125,6 +125,22 @@ documentos soportados,
 
 ---
 
+### HU-34: Adjuntar archivos al chat
+**Como** usuario,
+**quiero** adjuntar uno o varios archivos a la conversación actual,
+**para** buscar y comparar su información con la de la carpeta indexada.
+
+**Criterios de aceptación:**
+- El botón «Adjuntar…» aparece junto a «Artefactos» en el panel lateral.
+- Se pueden adjuntar uno o varios archivos de los formatos indexables.
+- La respuesta combina los fragmentos de la carpeta y de los adjuntos, y cada
+  fragmento conserva su origen (carpeta o adjunto).
+- Los adjuntos de una sesión nunca se filtran a otra (extiende HU-06).
+- Quitar un adjunto o borrar la sesión elimina sus fragmentos, documentos y
+  archivos almacenados.
+
+---
+
 ## ÉPICA 3: Motor RAG
 
 ### HU-09: Chunking semántico de Markdown
