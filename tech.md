@@ -12,6 +12,13 @@ A continuación, las tecnologías necesarias para construir este software, todas
 - Ideal para paneles laterales, listas de carpetas/sesiones, chat con streaming.
 - Ecosistema maduro: `eframe` como capa de aplicación, `egui_extras` para tablas y árboles.
 
+**Temas y resaltado**
+- Tema claro **Novel**, oscuro **Tokyo Night** o el del sistema, con cambio
+  inmediato.
+- Los bloques de código en modo oscuro se resaltan con la paleta **Monokai** de
+  Sublime Text (fondo `#272822`); en modo claro se usa la paleta Novel. El
+  resaltado es propio (`tokenize_code` + `LayoutJob`), sin dependencias externas.
+
 **Alternativa: Iced**
 - Arquitectura tipo Elm (mensajes, estado, vistas), muy adecuada para apps con estado complejo como esta.
 - Renderizado basado en wgpu, buena integración con fuentes e imágenes.
@@ -37,13 +44,20 @@ A continuación, las tecnologías necesarias para construir este software, todas
 - `HashingEmbedding` genera embeddings locales deterministas; no descarga modelos
   ni envía documentos a un servicio de embeddings.
 - SQLite (`rusqlite`) persiste chunks y vectores. El índice vectorial coseno y
-  BM25 se construyen en memoria y se conservan en caché por carpeta; se renuevan
-  cuando cambia la revisión del índice.
+  BM25 se construyen en memoria y se conservan en caché por carpeta y por sesión;
+  se renuevan cuando cambia la revisión del índice o la de los adjuntos.
 - El recuperador fusiona BM25 normalizado y similitud vectorial. Los parámetros
   de BM25, el peso vectorial y la amplitud del pool se pueden ajustar mediante
   `HybridRetrieverOptions`. La tokenización descarta palabras vacías en español e
   inglés y normaliza acentos; el índice léxico incluye encabezado y nombre de
   archivo.
+- El corte de contexto es relativo al mejor resultado **de cada origen** (carpeta
+  y adjuntos por separado) y se reserva una plaza al mejor de cada uno, de modo
+  que una fuente no eclipsa a la otra y ambas pueden compararse.
+- **Referencia cruzada** (`lookup_terms`): los identificadores que mencionan los
+  adjuntos (folios, claves, RFC) se buscan también en la carpeta y sus
+  coincidencias se anteponen al contexto, para que la pregunta no tenga que
+  repetir el código.
 - Markdown y código usan un chunker estructural; CSV, Excel, Office y PDF pasan
   por `raggy-docs` antes de crear fragmentos con su ubicación de origen.
 - El recuperador de un chat puede fusionar los fragmentos de la carpeta con los
@@ -61,11 +75,13 @@ A continuación, las tecnologías necesarias para construir este software, todas
   - Mensajes e historial.
   - Artefactos generados (nombre, ruta, fecha, sesión).
   - Memoria del proyecto.
-- Las migraciones versionadas gestionan cambios de esquema; las consultas se
-  ejecutan con una conexión SQLite por hilo de trabajo.
+- Las migraciones versionadas gestionan cambios de esquema (versión 9: adjuntos por
+  sesión); las consultas se ejecutan con una conexión SQLite por hilo de trabajo.
 - Los documentos y fragmentos pertenecen exactamente a una carpeta indexada o a
   una sesión (archivos adjuntos), nunca a ambas; se eliminan en cascada con su
   propietario.
+- Los archivos adjuntos se guardan en `attachments/<sesión>/` y se incluyen en el
+  respaldo y la restauración, como los archivos subidos y los artefactos físicos.
 
 ---
 

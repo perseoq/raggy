@@ -135,6 +135,8 @@ documentos soportados,
 - Se pueden adjuntar uno o varios archivos de los formatos indexables.
 - La respuesta combina los fragmentos de la carpeta y de los adjuntos, y cada
   fragmento conserva su origen (carpeta o adjunto).
+- Los identificadores que menciona un adjunto (folios, claves) se buscan también
+  en la carpeta, para encontrar el registro al que apunta sin repetir el código.
 - Los adjuntos de una sesión nunca se filtran a otra (extiende HU-06).
 - Quitar un adjunto o borrar la sesión elimina sus fragmentos, documentos y
   archivos almacenados.
@@ -162,8 +164,9 @@ documentos soportados,
 
 **Criterios de aceptación:**
 - Se recuperan top-K fragmentos (configurable, por defecto 5).
-- El contexto se acota con un corte **relativo al mejor resultado**, de modo que
-  nunca se descarta el fragmento más relevante de la consulta.
+- El contexto se acota con un corte **relativo al mejor resultado de cada origen**
+  (carpeta y adjuntos), de modo que nunca se descarta el fragmento más relevante
+  ni una fuente eclipsa a la otra.
 - El análisis ignora palabras vacías y acentos, y pesa también el título y el
   nombre del archivo.
 - Si no hay ninguna coincidencia, el sistema lo indica al usuario.
@@ -276,7 +279,8 @@ documentos soportados,
 
 **Criterios de aceptación:**
 - Existe un botón "Vista previa" en cada bloque.
-- La vista previa muestra el código con resaltado de sintaxis.
+- La vista previa muestra el código con resaltado de sintaxis (Monokai en modo
+  oscuro).
 - Se muestra el nombre propuesto y la extensión.
 - Se puede copiar al portapapeles.
 
@@ -383,6 +387,8 @@ documentos soportados,
 - Existe opción en preferencias.
 - El cambio es inmediato, sin reiniciar.
 - La preferencia se guarda entre sesiones.
+- En modo oscuro, los bloques de código usan el resaltado **Monokai** de Sublime
+  Text; en claro, la paleta Novel.
 
 ---
 
@@ -393,7 +399,8 @@ documentos soportados,
 
 **Criterios de aceptación:**
 - Panel avanzado con estos parámetros.
-- El corte de contexto es relativo al mejor resultado (fracción 0.0–1.0).
+- El corte de contexto es relativo al mejor resultado de cada origen (fracción
+  0.0–1.0).
 - Valores por defecto sensatos y documentados.
 - Cambios aplican a nuevas indexaciones o requieren reindexar (según parámetro).
 - Se advierte si el usuario elige valores extremos.
@@ -461,7 +468,8 @@ documentos soportados,
 
 **Criterios de aceptación:**
 - Función "Exportar todo" que empaqueta base de datos, configuración (sin claves),
-  archivos subidos y archivos físicos de artefactos registrados.
+  archivos subidos, adjuntos de los chats y archivos físicos de artefactos
+  registrados.
 - Función "Importar" que restaura en un directorio de datos nuevo y lo activa al
   reiniciar, sin sobrescribir archivos de la instalación actualmente abierta.
 - Se validan integridad, rutas, número de entradas y tamaños del paquete antes

@@ -69,15 +69,19 @@ Software de escritorio con interfaz gráfica moderna, escrito en Rust, que funci
 - Historial persistente, reanudable y exportable.
 - Contexto de sesión limitado a la carpeta asociada (aislamiento estricto).
 - Archivos adjuntos por sesión (HU-34): se añaden uno o varios archivos al chat
-  y su contenido se busca junto con el de la carpeta, distinguiendo el origen.
+  y su contenido se busca junto con el de la carpeta, distinguiendo el origen y
+  buscando en la carpeta los identificadores que el adjunto mencione.
 
 ### 5.3 Motor RAG
 - Recuperación de top-K fragmentos relevantes por consulta.
 - Re-ranking opcional para mejorar precisión.
 - Inyección de fragmentos con citas verificables de archivo y ubicación nativa
   (líneas, página, diapositiva o coordenadas de hoja/celdas).
-- Umbral relativo: el contexto se acota respecto al mejor resultado, sin
-  descartar nunca el fragmento más relevante.
+- Umbral relativo: el contexto se acota respecto al mejor resultado **de cada
+  origen** (carpeta y adjuntos), sin descartar nunca el fragmento más relevante ni
+  permitir que una fuente eclipse a la otra.
+- Referencia cruzada: los identificadores que menciona un adjunto se buscan
+  también en la carpeta indexada.
 
 ### 5.4 Motor de Chat
 - Streaming de respuestas token a token.
@@ -111,7 +115,8 @@ Software de escritorio con interfaz gráfica moderna, escrito en Rust, que funci
 - Manejo de errores, rate limits y fallback opcional.
 
 ### 5.8 Configuración y Preferencias
-- Tema claro/oscuro.
+- Tema claro/oscuro (los bloques de código en modo oscuro se resaltan con la
+  paleta Monokai de Sublime Text).
 - Idioma de interfaz.
 - Directorio de almacenamiento de datos.
 - Parámetros del RAG (tamaño de chunk, top-K, umbral).
@@ -141,6 +146,16 @@ Software de escritorio con interfaz gráfica moderna, escrito en Rust, que funci
 1. Usuario abre la app.
 2. Ve carpetas indexadas con sus sesiones y artefactos.
 3. Retoma una sesión y el contexto previo se restaura.
+
+**Flujo D — Contrastar un adjunto con la carpeta (HU-34):**
+1. En un chat, el usuario pulsa «Adjuntar» y elige, por ejemplo, una factura PDF.
+2. El adjunto se indexa bajo esa sesión y aparece como etiqueta sobre la
+   conversación.
+3. Pregunta por los datos de la factura sin repetir su folio.
+4. El sistema busca en la carpeta y en los adjuntos; además, localiza en los CSV
+   las filas que el adjunto referencia por su folio.
+5. La respuesta cita cada fuente por separado (carpeta y adjunto) y permite
+   compararlas.
 
 ---
 

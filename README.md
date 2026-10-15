@@ -34,7 +34,8 @@ Windows.
 - **Límites de recursos configurables** en Configuración: tamaño máximo de
   archivo, expansión de Office, páginas y texto PDF, píxeles OCR y timeout de las
   herramientas externas. Los archivos que superan los límites se reportan sin
-  bloquear indefinidamente la indexación.
+  bloquear indefinidamente la indexación, y un recorrido incompleto no retira del
+  índice archivos que no pudo examinar.
 - Botón **Subir archivos** para incorporar archivos sueltos: se copian
   a una carpeta gestionada («Archivos subidos») que se indexa como una más, sin
   tocar los originales. Si un archivo ya existe con el mismo nombre, se reemplaza
@@ -52,9 +53,6 @@ Windows.
 - **Reindexación incremental** por hash del archivo y huella de opciones del
   pipeline: los cambios de chunking, embeddings, OCR o herramientas disponibles
   también se aplican al volver a indexar.
-- **Límites de recursos configurables**: tamaño máximo de archivo, expansión de
-  paquetes Office, páginas PDF, píxeles por imagen OCR y timeout de herramientas.
-  Un recorrido incompleto no retira del índice archivos que no pudo examinar.
 - **Vigilancia automática** de la carpeta: al cambiar un archivo se reindexa solo.
 - La indexación corre en segundo plano: la interfaz nunca se bloquea.
 
@@ -62,18 +60,25 @@ Windows.
 - **Embeddings locales** deterministas, sin modelos ni conexión a internet.
 - Índice vectorial (similitud coseno) + índice léxico **BM25 normalizado por la
   consulta**, fusionados con un **corte relativo al mejor resultado de cada
-  origen** (nunca se descarta el fragmento más relevante y una fuente no eclipsa
-  a la otra). El recuperador se mantiene
-  en caché por carpeta y se renueva al reindexar.
+  origen**: nunca se descarta el fragmento más relevante y una fuente (la carpeta
+  o los adjuntos) no eclipsa a la otra. Los recuperadores se mantienen en caché
+  por carpeta y por sesión, y se renuevan al reindexar o al cambiar los adjuntos.
 - **Análisis de texto**: se descartan las palabras vacías y la búsqueda no
   distingue acentos (`gestion` encuentra «gestión»); el índice léxico pesa además
   el encabezado y el nombre del archivo.
+- **Referencia cruzada**: si un adjunto menciona un identificador (el folio de una
+  factura que apunta a una fila de `ventas.csv`), ese identificador se busca
+  también en la carpeta y sus coincidencias se anteponen al contexto. Así la
+  pregunta no tiene que repetir el código para que aparezca el registro.
 - Buscador que muestra los fragmentos más relevantes con su puntuación y su cita
   (`archivo.md (líneas 12-20)`) y abre el fragmento exacto al seleccionarlo.
 
 ### Chat con contexto y citas
 - **Sesiones aisladas por carpeta**: cada sesión solo consulta su propia
-  documentación.
+  documentación; sus adjuntos nunca se filtran a otros chats.
+- **Adjuntos por chat**: añade uno o varios archivos a la conversación para
+  contrastarlos con la carpeta; el contexto indica el origen de cada fragmento
+  (carpeta o adjunto) sin alterar la etiqueta de la cita.
 - **Streaming** token a token, con botón para detener la generación.
 - **Prompt estricto**: el modelo solo responde con el contexto recuperado, cita
   la fuente y, si no está en la documentación, responde
@@ -108,7 +113,8 @@ Windows.
 - **Directorio de datos** configurable con migración de los datos existentes.
 - **Exportar una sesión** a Markdown (con historial, citas y artefactos).
 - **Respaldo e importación** en un `.zip` con base de datos, configuración sin
-  claves, archivos subidos y artefactos físicos registrados; se verifica integridad y
+  claves, archivos subidos, adjuntos de los chats y artefactos físicos
+  registrados; se verifica integridad y
   límites antes de restaurar en un directorio de datos nuevo.
   La restauración cambia `data_dir` y requiere reiniciar; las carpetas fuente
   externas no se copian (sus chunks sí quedan en la base de datos), por lo que
@@ -157,9 +163,12 @@ Herramientas **opcionales** (solo si vas a usar esas funciones):
 4. **Chatea.** Dentro de esa carpeta, pulsa **Nueva** en la sección *Sesiones*.
    Elige proveedor y modelo (y un respaldo si quieres) y escribe tu pregunta. Las
    respuestas aparecen en streaming y con sus fuentes.
-5. **Descarga el código.** Bajo cada bloque de código de una respuesta tienes
+5. **Adjunta archivos (opcional).** Con **Adjuntar**, junto a *Artefactos*, subes
+   archivos al chat actual para compararlos con la carpeta; aparecen como
+   etiquetas sobre la conversación y puedes quitarlos uno a uno.
+6. **Descarga el código.** Bajo cada bloque de código de una respuesta tienes
    *Vista previa*, *Copiar*, *Descargar* y, si hay varios, *Descargar todo*.
-6. **Consulta lo generado.** La ventana **Artefactos** muestra el árbol de
+7. **Consulta lo generado.** La ventana **Artefactos** muestra el árbol de
    archivos descargados y permite abrir su ubicación, archivarlos o exportar la
    lista.
 
@@ -277,12 +286,12 @@ RAGGY_HOME=./raggy-home RUST_LOG=debug cargo run -p raggy-app
 ```
 raggy/
 ├── crates/
-│   ├── core/       # configuración, rutas, indexación, chat, artefactos, respaldo
+│   ├── core/       # configuración, rutas, indexación, adjuntos, chat, artefactos, respaldo
 │   ├── docs/       # extracción de documentos (CSV, Office, PDF) y OCR
 │   ├── llm/        # contrato multi-proveedor, streaming SSE y prompt estricto
-│   ├── rag/        # chunking semántico, embeddings, BM25 y recuperación híbrida
+│   ├── rag/        # chunking, embeddings, BM25, recuperación híbrida y referencia cruzada
 │   ├── storage/    # SQLite, migraciones versionadas y repositorio
-│   ├── ui/         # interfaz egui/eframe
+│   ├── ui/         # interfaz egui/eframe (Novel y Tokyo Night; código en Monokai)
 │   └── app/        # binario `raggy`
 └── .github/        # integración continua y flujo de publicación
 ```

@@ -10,6 +10,17 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.2.9] - 2026-10-15
+
+### Cambiado
+
+- **Documentación sincronizada** con las últimas versiones (`README`, `hu.md`,
+  `plan.md` y `tech.md`): adjuntos por chat (HU-34), corte relativo por origen,
+  búsqueda por referencia cruzada, respaldo de los adjuntos y resaltado **Monokai**
+  de los bloques de código en modo oscuro.
+- Se elimina en el `README` un apartado duplicado sobre los límites de recursos y
+  se añade el paso de adjuntar archivos al flujo de uso.
+
 ## [2.2.8] - 2026-10-15
 
 ### Cambiado
