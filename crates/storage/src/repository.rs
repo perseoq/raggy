@@ -340,12 +340,34 @@ impl Storage {
 
     /// Recupera los chunks de un archivo concreto, ordenados por posición.
     pub fn list_chunks_for_path(&self, folder_id: &str, source_path: &str) -> Result<Vec<Chunk>> {
-        let mut stmt = self.connection().prepare(
+        self.list_chunks_for_path_owned("folder_id", folder_id, source_path)
+    }
+
+    /// Recupera los fragmentos de un adjunto concreto de una sesión.
+    ///
+    /// Permite resolver las citas que apuntan a un archivo adjunto al chat, no
+    /// solo a los archivos de la carpeta indexada.
+    pub fn list_session_chunks_for_path(
+        &self,
+        session_id: &str,
+        source_path: &str,
+    ) -> Result<Vec<Chunk>> {
+        self.list_chunks_for_path_owned("session_id", session_id, source_path)
+    }
+
+    /// Implementación común de las consultas de fragmentos por ruta.
+    fn list_chunks_for_path_owned(
+        &self,
+        column: &str,
+        id: &str,
+        source_path: &str,
+    ) -> Result<Vec<Chunk>> {
+        let mut stmt = self.connection().prepare(&format!(
             "SELECT id, source_path, source_file, heading, location, start_line, end_line,
                     content_hash, content
-             FROM chunks WHERE folder_id = ?1 AND source_path = ?2 ORDER BY start_line ASC",
-        )?;
-        let rows = stmt.query_map(params![folder_id, source_path], |row| {
+             FROM chunks WHERE {column} = ?1 AND source_path = ?2 ORDER BY start_line ASC"
+        ))?;
+        let rows = stmt.query_map(params![id, source_path], |row| {
             Ok(Chunk {
                 id: row.get(0)?,
                 content_hash: row.get(7)?,

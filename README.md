@@ -88,7 +88,8 @@ Windows.
   coordenadas de celda** en Excel y CSV (`hoja Ventas, A2:D20`).
 - **Citas verificadas y clicables** en cada respuesta: solo se marcan como
   ancladas las referencias que coinciden exactamente con fuentes recuperadas;
-  al pulsarlas se abre el fragmento correspondiente en la vista previa.
+  al pulsarlas se abre en el panel lateral **solo ese fragmento** (de la carpeta o
+  del adjunto), que se cierra con la ✕ o con `Esc`.
 - Temperatura `0.1` por defecto para minimizar invenciones.
 
 ### Código generado, listo para guardar

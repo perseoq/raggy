@@ -17,6 +17,11 @@ pub fn eye() -> egui::ImageSource<'static> {
     egui::include_image!("../assets/icons/eye.svg")
 }
 
+/// Icono de cerrar.
+pub fn close() -> egui::ImageSource<'static> {
+    egui::include_image!("../assets/icons/close.svg")
+}
+
 /// Icono de carpeta.
 pub fn folder() -> egui::ImageSource<'static> {
     egui::include_image!("../assets/icons/folder.svg")

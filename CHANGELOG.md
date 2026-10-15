@@ -10,6 +10,17 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.2.11] - 2026-10-15
+
+### Corregido
+
+- Al pulsar una **cita** se abre en el panel lateral **solo el fragmento citado**,
+  en lugar de todos los fragmentos del archivo citado (HU-11).
+- El panel lateral de fragmentos ahora tiene un botón de **cerrar (**✕**)** y se
+  cierra con `Esc`; antes quedaba abierto y no había forma de cerrarlo.
+- Las citas que apuntan a un **adjunto** del chat también resuelven su fragmento
+  (`list_session_chunks_for_path`), no solo las de la carpeta indexada.
+
 ## [2.2.10] - 2026-10-15
 
 ### Cambiado

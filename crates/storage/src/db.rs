@@ -518,4 +518,51 @@ mod tests {
         );
         assert_eq!(storage.count_chunks(&folder.id).expect("cuenta"), 1);
     }
+
+    #[test]
+    fn recupera_los_fragmentos_de_un_adjunto_por_su_ruta() {
+        let mut storage = Storage::open_in_memory().expect("abre en memoria");
+        let folder = Folder::new("/tmp/citas", "citas");
+        storage.upsert_folder(&folder).expect("guarda carpeta");
+        let session = Session::new(&folder.id, "deepseek", "deepseek-chat");
+        storage.upsert_session(&session).expect("guarda sesión");
+
+        // El mismo nombre de archivo existe en la carpeta y como adjunto: cada
+        // propietario debe ver solo su propio fragmento (HU-34).
+        storage
+            .replace_file_index(
+                IndexOwner::Folder(&folder.id),
+                "informe.pdf",
+                &[fragmento("carpeta", "fragmento de la carpeta")],
+                &[vec![0.0; 8]],
+                &Document::new(&folder.id, "informe.pdf", "h", "p", 10, 0, 1),
+            )
+            .expect("guarda la carpeta");
+        storage
+            .replace_file_index(
+                IndexOwner::Session(&session.id),
+                "informe.pdf",
+                &[fragmento("adjunto", "fragmento del adjunto")],
+                &[vec![0.0; 8]],
+                &Document::for_session(&session.id, "informe.pdf", "h", "p", 10, 0, 1),
+            )
+            .expect("guarda el adjunto");
+
+        let del_adjunto = storage
+            .list_session_chunks_for_path(&session.id, "informe.pdf")
+            .expect("fragmentos del adjunto");
+        assert_eq!(del_adjunto.len(), 1);
+        assert_eq!(del_adjunto[0].content, "fragmento del adjunto");
+
+        let de_la_carpeta = storage
+            .list_chunks_for_path(&folder.id, "informe.pdf")
+            .expect("fragmentos de la carpeta");
+        assert_eq!(de_la_carpeta.len(), 1);
+        assert_eq!(de_la_carpeta[0].content, "fragmento de la carpeta");
+
+        assert!(storage
+            .list_session_chunks_for_path(&session.id, "otro.pdf")
+            .expect("ruta inexistente")
+            .is_empty());
+    }
 }

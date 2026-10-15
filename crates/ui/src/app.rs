@@ -215,6 +215,10 @@ pub struct RaggyApp {
     selected_chunk_id: Option<String>,
     documents: Vec<Document>,
     chunks_preview: Vec<Chunk>,
+    /// ¿Está abierto el panel lateral de fragmentos? (se cierra con la ✕ o Esc)
+    chunks_panel_open: bool,
+    /// Título del panel: la ruta del archivo o la etiqueta de la cita.
+    chunks_panel_title: String,
     pending_delete: Option<String>,
     last_watch: HashMap<String, Instant>,
     query: String,
@@ -285,6 +289,8 @@ impl RaggyApp {
             selected_chunk_id: None,
             documents: Vec::new(),
             chunks_preview: Vec::new(),
+            chunks_panel_open: false,
+            chunks_panel_title: String::new(),
             pending_delete: None,
             last_watch: HashMap::new(),
             query: String::new(),
@@ -573,20 +579,25 @@ impl RaggyApp {
     fn select_folder(&mut self, id: String) {
         self.selected_folder = Some(id);
         self.active_session = None;
-        self.selected_document = None;
-        self.selected_chunk_id = None;
-        self.chunks_preview.clear();
+        self.clear_chunks_panel();
         self.results.clear();
         self.search_note = None;
         self.reload_documents();
         self.reload_sessions();
     }
 
-    fn reload_documents(&mut self) {
-        self.documents.clear();
+    /// Cierra el panel lateral de fragmentos y olvida lo seleccionado.
+    fn clear_chunks_panel(&mut self) {
         self.chunks_preview.clear();
         self.selected_document = None;
         self.selected_chunk_id = None;
+        self.chunks_panel_open = false;
+        self.chunks_panel_title.clear();
+    }
+
+    fn reload_documents(&mut self) {
+        self.documents.clear();
+        self.clear_chunks_panel();
 
         let Some(folder_id) = self.selected_folder.clone() else {
             return;
@@ -612,23 +623,58 @@ impl RaggyApp {
                 self.chunks_preview = chunks;
                 self.selected_document = Some(relative_path.to_string());
                 self.selected_chunk_id = None;
+                self.chunks_panel_title = relative_path.to_string();
+                // Explorar un documento del índice muestra todos sus fragmentos.
+                self.chunks_panel_open = true;
             }
             Err(error) => self.status = format!("No se pudieron cargar los fragmentos: {error}"),
         }
     }
 
+    /// Busca el fragmento exacto al que apunta una cita.
+    ///
+    /// La cita puede venir de la carpeta indexada o de un archivo adjunto al
+    /// chat, así que se consultan ambos orígenes.
+    fn cited_chunk(&self, citation: &Citation) -> Option<Chunk> {
+        let storage = self.storage.as_ref()?;
+        if let Some(folder_id) = self.selected_folder.as_deref() {
+            if let Ok(chunks) = storage.list_chunks_for_path(folder_id, &citation.source_path) {
+                if let Some(chunk) = chunks
+                    .into_iter()
+                    .find(|chunk| citation.matches_chunk(chunk))
+                {
+                    return Some(chunk);
+                }
+            }
+        }
+        if let Some(session_id) = self.active_session.as_ref().map(|session| &session.id) {
+            if let Ok(chunks) =
+                storage.list_session_chunks_for_path(session_id, &citation.source_path)
+            {
+                return chunks
+                    .into_iter()
+                    .find(|chunk| citation.matches_chunk(chunk));
+            }
+        }
+        None
+    }
+
+    /// Abre el panel lateral con **solo** el fragmento al que apunta la cita.
     fn open_citation(&mut self, citation: &Citation) {
-        self.load_chunks(&citation.source_path);
-        self.selected_chunk_id = self
-            .chunks_preview
-            .iter()
-            .find(|chunk| citation.matches_chunk(chunk))
-            .map(|chunk| chunk.id.clone());
-        if self.selected_chunk_id.is_none() {
-            self.status = format!(
-                "No se encontró el fragmento citado en {}.",
-                citation.label()
-            );
+        match self.cited_chunk(citation) {
+            Some(chunk) => {
+                self.selected_document = Some(citation.source_path.clone());
+                self.selected_chunk_id = Some(chunk.id.clone());
+                self.chunks_preview = vec![chunk];
+                self.chunks_panel_title = citation.label();
+                self.chunks_panel_open = true;
+            }
+            None => {
+                self.status = format!(
+                    "No se encontró el fragmento citado en {}.",
+                    citation.label()
+                );
+            }
         }
     }
 
@@ -693,8 +739,7 @@ impl RaggyApp {
                 self.streaming = None;
                 self.results.clear();
                 self.search_note = None;
-                self.selected_document = None;
-                self.chunks_preview.clear();
+                self.clear_chunks_panel();
             }
             Ok(None) => self.status = "La sesión ya no existe.".to_string(),
             Err(error) => self.status = format!("No se pudo abrir la sesión: {error}"),
@@ -2433,17 +2478,36 @@ impl RaggyApp {
         )
     }
 
+    /// Panel lateral con los fragmentos de un archivo del índice o con el
+    /// fragmento concreto al que apunta una cita. Se cierra con la ✕ o con Esc.
     fn chunks_panel(&mut self, ui: &mut egui::Ui) {
-        let Some(relative_path) = self.selected_document.clone() else {
+        if !self.chunks_panel_open {
             return;
-        };
+        }
 
+        let title = self.chunks_panel_title.clone();
+        let single = self.chunks_preview.len() == 1;
         let mut selected_chunk_id = None;
+        let mut close = false;
         egui::Panel::right("chunks_panel")
             .default_size(460.0)
             .show(ui, |ui| {
                 ui.add_space(8.0);
-                ui.strong(relative_path);
+                ui.horizontal(|ui| {
+                    ui.strong(&title);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if crate::icons::icon_button(
+                            ui,
+                            crate::icons::close(),
+                            "Cerrar (Esc)",
+                            ui.visuals().weak_text_color(),
+                        )
+                        .clicked()
+                        {
+                            close = true;
+                        }
+                    });
+                });
                 ui.separator();
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     if self.chunks_preview.is_empty() {
@@ -2452,10 +2516,17 @@ impl RaggyApp {
                     }
                     for (index, chunk) in self.chunks_preview.iter().enumerate() {
                         let citation = Citation::from_chunk(chunk, 0.0);
+                        // Al abrir una cita solo hay un fragmento: se etiqueta con
+                        // la cita misma, sin numerarlo.
+                        let label = if single {
+                            citation.label()
+                        } else {
+                            format!("Fragmento {} · {}", index + 1, citation.label())
+                        };
                         if ui
                             .selectable_label(
                                 self.selected_chunk_id.as_deref() == Some(&chunk.id),
-                                format!("Fragmento {} · {}", index + 1, citation.label()),
+                                label,
                             )
                             .clicked()
                         {
@@ -2472,8 +2543,17 @@ impl RaggyApp {
                     }
                 });
             });
+
+        // Esc cierra el panel, como la ✕.
+        if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            close = true;
+        }
+
         if let Some(chunk_id) = selected_chunk_id {
             self.selected_chunk_id = Some(chunk_id);
+        }
+        if close {
+            self.chunks_panel_open = false;
         }
     }
 

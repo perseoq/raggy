@@ -188,6 +188,8 @@ documentos soportados,
 - Solo se validan las etiquetas que coinciden literalmente con fragmentos
   recuperados; las referencias no verificadas no anclan la respuesta.
 - Las citas verificadas son clicables y abren el fragmento exacto en la vista previa.
+- La vista previa de una cita muestra **solo** ese fragmento, ya provenga de la
+  carpeta o de un adjunto, y se cierra con la ✕ o con `Esc`.
 - Si el modelo no cita una fuente recuperada, la respuesta se marca como "no anclada".
 
 ---
