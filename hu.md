@@ -148,6 +148,8 @@ documentos soportados,
 - Se recuperan top-K fragmentos (configurable, por defecto 5).
 - El contexto se acota con un corte **relativo al mejor resultado**, de modo que
   nunca se descarta el fragmento más relevante de la consulta.
+- El análisis ignora palabras vacías y acentos, y pesa también el título y el
+  nombre del archivo.
 - Si no hay ninguna coincidencia, el sistema lo indica al usuario.
 - Los fragmentos se inyectan con cita de archivo y línea.
 

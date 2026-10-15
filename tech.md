@@ -41,7 +41,9 @@ A continuación, las tecnologías necesarias para construir este software, todas
   cuando cambia la revisión del índice.
 - El recuperador fusiona BM25 normalizado y similitud vectorial. Los parámetros
   de BM25, el peso vectorial y la amplitud del pool se pueden ajustar mediante
-  `HybridRetrieverOptions`.
+  `HybridRetrieverOptions`. La tokenización descarta palabras vacías en español e
+  inglés y normaliza acentos; el índice léxico incluye encabezado y nombre de
+  archivo.
 - Markdown y código usan un chunker estructural; CSV, Excel, Office y PDF pasan
   por `raggy-docs` antes de crear fragmentos con su ubicación de origen.
 

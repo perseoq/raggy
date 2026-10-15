@@ -200,9 +200,10 @@ pub const INDEXABLE_EXTENSIONS: &[&str] = &[
     "tf", "proto", "graphql", "ini", "cfg", "conf", "asm", "sol",
 ];
 
-/// Incrementar cuando cambie la semántica del pipeline (extractores, chunkers o
-/// embeddings) sin que cambien las opciones visibles.
-const INDEX_PIPELINE_VERSION: u32 = 1;
+/// Incrementar cuando cambie la semántica del pipeline (extractores, chunkers,
+/// tokenización o embeddings) sin que cambien las opciones visibles. Al subirlo,
+/// la huella de procesamiento cambia y las carpetas se reindexan solas.
+const INDEX_PIPELINE_VERSION: u32 = 2;
 
 /// Indexa una carpeta de forma incremental.
 ///
@@ -306,9 +307,11 @@ pub fn index_folder(
         }
         summary.warnings.extend(warnings);
 
+        // El encabezado se incluye en el embedding para que una consulta que
+        // mencione el título del documento se acerque más a sus fragmentos.
         let embeddings: Vec<Vec<f32>> = chunks
             .iter()
-            .map(|chunk| embedder.embed(&chunk.content).vector)
+            .map(|chunk| embedder.embed(&embedding_text(chunk)).vector)
             .collect();
 
         storage.replace_chunks(folder_id, &relative, &chunks, &embeddings)?;
@@ -369,6 +372,15 @@ fn read_file_limited(path: &Path, max_bytes: u64) -> std::io::Result<Vec<u8>> {
         ));
     }
     Ok(bytes)
+}
+
+/// Texto que se vectoriza: el encabezado precede al contenido para que una
+/// consulta que mencione el título del documento se acerque a sus fragmentos.
+fn embedding_text(chunk: &Chunk) -> String {
+    match &chunk.metadata.heading {
+        Some(heading) => format!("{heading}\n{}", chunk.content),
+        None => chunk.content.clone(),
+    }
 }
 
 /// ¿El archivo se trocea con el chunker de Markdown (encabezados y bloques de

@@ -56,6 +56,9 @@ Windows.
   consulta**, fusionados con un **corte relativo al mejor resultado** (nunca se
   descarta el fragmento más relevante). El recuperador se mantiene
   en caché por carpeta y se renueva al reindexar.
+- **Análisis de texto**: se descartan las palabras vacías y la búsqueda no
+  distingue acentos (`gestion` encuentra «gestión»); el índice léxico pesa además
+  el encabezado y el nombre del archivo.
 - Buscador que muestra los fragmentos más relevantes con su puntuación y su cita
   (`archivo.md (líneas 12-20)`) y abre el fragmento exacto al seleccionarlo.
 

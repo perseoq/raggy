@@ -1,24 +1,54 @@
 //! Tokenización e *hashing* determinista, base de los embeddings locales.
 
-/// Tokeniza un texto: separa por caracteres no alfanuméricos, pasa a minúsculas
-/// y conserva acentos (relevantes en español).
+use crate::stopwords::is_stopword;
+
+/// Tokeniza un texto para indexar y buscar: separa por caracteres no
+/// alfanuméricos, pasa a minúsculas, elimina acentos y descarta palabras vacías.
+///
+/// Normalizar los acentos mejora la coincidencia cuando el usuario escribe sin
+/// tildes («gestion» debe encontrar «gestión»).
 pub fn tokenize(text: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
 
     for character in text.chars() {
         if character.is_alphanumeric() || character == '_' {
-            current.extend(character.to_lowercase());
+            for lower in character.to_lowercase() {
+                current.push(fold(lower));
+            }
         } else if !current.is_empty() {
-            tokens.push(std::mem::take(&mut current));
+            push_token(&mut tokens, &mut current);
         }
     }
 
     if !current.is_empty() {
-        tokens.push(current);
+        push_token(&mut tokens, &mut current);
     }
 
     tokens
+}
+
+/// Añade el token si no es una palabra vacía y limpia el acumulador.
+fn push_token(tokens: &mut Vec<String>, current: &mut String) {
+    if !is_stopword(current) {
+        tokens.push(std::mem::take(current));
+    } else {
+        current.clear();
+    }
+}
+
+/// Reduce las vocales acentuadas y algunas consonantes a su forma básica.
+fn fold(character: char) -> char {
+    match character {
+        'á' | 'à' | 'ä' | 'â' | 'ã' | 'å' => 'a',
+        'é' | 'è' | 'ë' | 'ê' => 'e',
+        'í' | 'ì' | 'ï' | 'î' => 'i',
+        'ó' | 'ò' | 'ö' | 'ô' | 'õ' => 'o',
+        'ú' | 'ù' | 'ü' | 'û' => 'u',
+        'ñ' => 'n',
+        'ç' => 'c',
+        other => other,
+    }
 }
 
 /// Hash FNV-1a de 64 bits, estable entre ejecuciones y plataformas.
@@ -36,11 +66,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tokeniza_acentos_y_separadores() {
+    fn normaliza_acentos_y_quita_palabras_vacias() {
         assert_eq!(
             tokenize("La Gestión, ágil funciona."),
-            vec!["la", "gestión", "ágil", "funciona"]
+            vec!["gestion", "agil", "funciona"]
         );
+    }
+
+    #[test]
+    fn el_acento_no_impide_la_coincidencia() {
+        assert_eq!(tokenize("gestión"), tokenize("gestion"));
+        assert_eq!(tokenize("AÑO"), tokenize("ano"));
     }
 
     #[test]

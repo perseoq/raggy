@@ -239,8 +239,20 @@ impl HybridRetriever {
     ///
     /// Si el embedding falta o su dimensionalidad no coincide con la del
     /// proveedor, el fragmento sigue siendo recuperable por BM25.
+    ///
+    /// La búsqueda léxica indexa además el encabezado y el nombre del archivo
+    /// para que una consulta que mencione el título o el documento puntúe más.
     pub fn add(&mut self, chunk: Chunk, embedding: Option<Vec<f32>>) {
-        self.lexical.add(chunk.id.clone(), &chunk.content);
+        let mut lexical_text = String::new();
+        if let Some(heading) = &chunk.metadata.heading {
+            lexical_text.push_str(heading);
+            lexical_text.push(' ');
+        }
+        lexical_text.push_str(&chunk.metadata.source_file);
+        lexical_text.push(' ');
+        lexical_text.push_str(&chunk.content);
+
+        self.lexical.add(chunk.id.clone(), &lexical_text);
         if let Some(vector) = embedding {
             self.vector.add(chunk.id.clone(), vector);
         }
@@ -459,6 +471,33 @@ mod tests {
             results[0].score < 0.3,
             "el caso reproduce una puntuación baja: {}",
             results[0].score
+        );
+    }
+
+    #[test]
+    fn una_consulta_sin_relacion_no_aporta_contexto() {
+        let mut retriever = HybridRetriever::new(Box::new(HashingEmbedding::default()));
+        for (id, text) in [
+            (
+                "pagos",
+                "La cuota mensual del plan empresarial es de 49 euros por usuario.",
+            ),
+            ("red", "El servicio escucha en el puerto 8080 por defecto."),
+        ] {
+            let content = chunk(id, text);
+            let embedding = HashingEmbedding::default().embed(&content.content).vector;
+            retriever.add(content, Some(embedding));
+        }
+
+        // Antes, las palabras vacías compartidas hacían puntuar alto a consultas
+        // sin relación; ahora deben quedar sin señal.
+        let results = retriever.retrieve(
+            "¿cómo se llaman las montañas más altas de Marte?",
+            &RetrieverOptions::default(),
+        );
+        assert!(
+            results.is_empty(),
+            "una consulta sin relación no debe aportar contexto: {results:?}"
         );
     }
 

@@ -10,6 +10,27 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.2.2] - 2026-10-15
+
+### Añadido
+
+- Análisis de texto para la recuperación: se descartan las palabras vacías
+  (español e inglés) y se normalizan los acentos, de modo que `gestion` encuentra
+  «gestión». El índice léxico incluye además el encabezado y el nombre del
+  archivo, y el embedding del fragmento parte de su título.
+
+### Cambiado
+
+- Al cambiar la tokenización, la huella del pipeline se incrementa
+  (`INDEX_PIPELINE_VERSION` = 2): las carpetas ya indexadas se reprocesan solas en
+  la siguiente indexación.
+
+### Corregido
+
+- Las consultas sin relación dejaban de puntuar alto solo por compartir artículos
+  y preposiciones (antes ~0.15–0.26; ahora ~0.0), así que el corte relativo vuelve
+  a separar con claridad lo relevante del ruido.
+
 ## [2.2.1] - 2026-10-15
 
 ### Corregido

@@ -3,7 +3,7 @@
 //! Incluye el chunking semántico de Markdown (encabezados, listas y bloques de
 //! código) y el motor de recuperación: embeddings locales deterministas, un
 //! índice vectorial por similitud coseno, un índice léxico BM25 y un recuperador
-//! híbrido que fusiona ambos y aplica el umbral de similitud.
+//! híbrido que fusiona ambos y acota el contexto con un corte relativo.
 //!
 //! Todo el cómputo ocurre en local y sin descargar modelos, para no enviar el
 //! corpus a terceros.
@@ -14,6 +14,7 @@ pub mod embedding;
 pub mod markdown;
 pub mod retriever;
 pub mod section;
+pub mod stopwords;
 pub mod text;
 pub mod vector;
 
@@ -33,4 +34,5 @@ pub use retriever::{
     DEFAULT_VECTOR_WEIGHT, MIN_ABSOLUTE_SCORE, MIN_CANDIDATE_POOL,
 };
 pub use section::{chunk_sections, DocumentSection, SectionLocation};
+pub use stopwords::is_stopword;
 pub use vector::VectorIndex;
