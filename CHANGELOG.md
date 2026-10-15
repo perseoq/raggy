@@ -20,6 +20,12 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
   contexto. Antes, la pregunta no solía incluir el folio y la fila referenciada
   nunca llegaba al modelo, que respondía que el registro no aparecía.
 
+### Corregido
+
+- Las pruebas de adjuntos usan cada una su propio directorio temporal; antes
+  compartían uno y una podía borrar los archivos de otra al correr en paralelo,
+  lo que hacía fallar la verificación de la publicación de forma intermitente.
+
 ## [2.2.6] - 2026-10-15
 
 ### Corregido

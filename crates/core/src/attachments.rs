@@ -306,20 +306,23 @@ mod tests {
     }
 
     /// Crea una carpeta y una sesión en un almacén en memoria.
-    fn sesion_de_prueba() -> (Storage, String, PathBuf) {
+    ///
+    /// Cada prueba usa su propia etiqueta: compartir el directorio temporal haría
+    /// que una prueba borrara los archivos de otra al correr en paralelo.
+    fn sesion_de_prueba(tag: &str) -> (Storage, String, PathBuf) {
         let storage = Storage::open_in_memory().expect("abre SQLite");
         let folder = Folder::new("/tmp/adjuntos-prueba", "adjuntos");
         storage.upsert_folder(&folder).expect("guarda carpeta");
         let session = Session::new(&folder.id, "deepseek", "deepseek-chat");
         storage.upsert_session(&session).expect("guarda sesión");
-        let directory = temp_dir("destino").join(&session.id);
+        let directory = temp_dir(tag).join("adjuntos").join(&session.id);
         (storage, session.id, directory)
     }
 
     #[test]
     fn adjunta_indexa_y_quita_un_archivo() {
-        let (mut storage, session_id, directory) = sesion_de_prueba();
-        let origin = temp_dir("origen");
+        let (mut storage, session_id, directory) = sesion_de_prueba("adjunta");
+        let origin = temp_dir("adjunta-origen");
         let informe = origin.join("informe.md");
         std::fs::write(
             &informe,
@@ -364,8 +367,8 @@ mod tests {
 
     #[test]
     fn adjuntar_el_mismo_contenido_dos_veces_no_duplica() {
-        let (mut storage, session_id, directory) = sesion_de_prueba();
-        let origin = temp_dir("duplicado");
+        let (mut storage, session_id, directory) = sesion_de_prueba("duplicado");
+        let origin = temp_dir("duplicado-origen");
         let primero = origin.join("informe.md");
         std::fs::write(&primero, "# Informe\n\nmismo contenido\n").expect("escribe");
         let copia = origin.join("informe-copia.md");
@@ -407,8 +410,8 @@ mod tests {
 
     #[test]
     fn omite_archivos_no_indexables_y_demasiado_grandes() {
-        let (mut storage, session_id, directory) = sesion_de_prueba();
-        let origin = temp_dir("omitidos");
+        let (mut storage, session_id, directory) = sesion_de_prueba("omitidos");
+        let origin = temp_dir("omitidos-origen");
         let imagen = origin.join("foto.png");
         std::fs::write(&imagen, b"no es indexable").expect("escribe la imagen");
         let vacio = origin.join("vacio.md");
@@ -439,8 +442,8 @@ mod tests {
 
     #[test]
     fn usa_un_nombre_libre_si_ya_hay_otro_archivo_con_ese_nombre() {
-        let (mut storage, session_id, directory) = sesion_de_prueba();
-        let origin = temp_dir("colision");
+        let (mut storage, session_id, directory) = sesion_de_prueba("colision");
+        let origin = temp_dir("colision-origen");
         let primero = origin.join("a").join("informe.md");
         std::fs::create_dir_all(primero.parent().expect("padre")).expect("crea carpeta");
         std::fs::write(&primero, "# Primero\n\ncontenido uno\n").expect("escribe el primero");
@@ -481,8 +484,8 @@ mod tests {
 
     #[test]
     fn limpiar_los_adjuntos_borra_indices_y_archivos() {
-        let (mut storage, session_id, directory) = sesion_de_prueba();
-        let origin = temp_dir("limpiar");
+        let (mut storage, session_id, directory) = sesion_de_prueba("limpiar");
+        let origin = temp_dir("limpiar-origen");
         let informe = origin.join("informe.md");
         std::fs::write(&informe, "# Informe\n\ncontenido\n").expect("escribe");
 
