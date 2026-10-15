@@ -10,6 +10,15 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.2.8] - 2026-10-15
+
+### Cambiado
+
+- Los bloques de código en **modo oscuro** usan ahora el resaltado **Monokai** de
+  Sublime Text: fondo `#272822`, palabras reservadas en rosa `#F92672`, cadenas en
+  amarillo `#E6DB74`, números en morado `#AE81FF`, comentarios en gris `#75715E` y
+  texto claro `#F8F8F2`. El modo claro conserva la paleta Novel.
+
 ## [2.2.7] - 2026-10-15
 
 ### Añadido

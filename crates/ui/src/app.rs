@@ -3907,14 +3907,18 @@ fn render_code_blocks(
         let key = format!("{message_id}:{index}");
         let dark = ui.visuals().dark_mode;
         let expanded = previews.get(&key).copied().unwrap_or(false);
-        let tint = ui.visuals().weak_text_color();
 
         egui::Frame::NONE
-            .fill(ui.visuals().extreme_bg_color)
+            .fill(crate::theme::code_background(
+                dark,
+                ui.visuals().extreme_bg_color,
+            ))
             .stroke(egui::Stroke::new(1.0, crate::theme::bubble_stroke(dark)))
             .corner_radius(egui::CornerRadius::same(8))
             .inner_margin(egui::Margin::symmetric(6, 6))
             .show(ui, |ui| {
+                crate::theme::apply_code_visuals(ui);
+                let tint = ui.visuals().weak_text_color();
                 ui.set_width((ui.available_width() * 0.94).max(240.0));
 
                 ui.horizontal(|ui| {
@@ -4011,7 +4015,9 @@ struct Token {
 /// Construye el texto resaltado de un bloque de código (HU-18).
 fn highlight_job(ui: &egui::Ui, language: Option<&str>, code: &str) -> egui::text::LayoutJob {
     let font = egui::FontId::monospace(13.0);
-    let base = ui.visuals().text_color();
+    let dark = ui.visuals().dark_mode;
+    // En modo oscuro, el texto sin clasificar también es el de Monokai.
+    let base = crate::theme::code_text(dark, ui.visuals().text_color());
     let mut job = egui::text::LayoutJob::default();
 
     let width = ui.available_width();

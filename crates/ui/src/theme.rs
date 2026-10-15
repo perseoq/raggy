@@ -1,6 +1,9 @@
 //! Temas visuales: la paleta **Novel** (claro, la misma que incluye el terminal
 //! *ptyxis*) y **Tokyo Night** (oscuro).
 //!
+//! Los bloques de código en modo oscuro usan el resaltado **Monokai** de Sublime
+//! Text (fondo `#272822` y su paleta de tokens), por petición expresa.
+//!
 //! El modo «sistema» elige una u otra según la preferencia del sistema operativo.
 
 use eframe::egui::{self, Color32, Stroke, Theme as EguiTheme, Visuals};
@@ -29,13 +32,19 @@ const TN_BG_DARK: Color32 = Color32::from_rgb(0x16, 0x16, 0x1E);
 const TN_HIGHLIGHT: Color32 = Color32::from_rgb(0x29, 0x2E, 0x42);
 const TN_FG: Color32 = Color32::from_rgb(0xC0, 0xCA, 0xF5);
 const TN_FG_DARK: Color32 = Color32::from_rgb(0xA9, 0xB1, 0xD6);
-const TN_COMMENT: Color32 = Color32::from_rgb(0x56, 0x5F, 0x89);
 const TN_BLUE: Color32 = Color32::from_rgb(0x7A, 0xA2, 0xF7);
 const TN_GREEN: Color32 = Color32::from_rgb(0x9E, 0xCE, 0x6A);
 const TN_PURPLE: Color32 = Color32::from_rgb(0xBB, 0x9A, 0xF7);
-const TN_ORANGE: Color32 = Color32::from_rgb(0xFF, 0x9E, 0x64);
 const TN_RED: Color32 = Color32::from_rgb(0xF7, 0x76, 0x8E);
 const TN_YELLOW: Color32 = Color32::from_rgb(0xE0, 0xAF, 0x68);
+
+// --- Monokai (Sublime Text): bloques de código en modo oscuro ---
+const MONOKAI_BG: Color32 = Color32::from_rgb(0x27, 0x28, 0x22);
+const MONOKAI_FG: Color32 = Color32::from_rgb(0xF8, 0xF8, 0xF2);
+const MONOKAI_COMMENT: Color32 = Color32::from_rgb(0x75, 0x71, 0x5E);
+const MONOKAI_KEYWORD: Color32 = Color32::from_rgb(0xF9, 0x26, 0x72);
+const MONOKAI_STRING: Color32 = Color32::from_rgb(0xE6, 0xDB, 0x74);
+const MONOKAI_NUMBER: Color32 = Color32::from_rgb(0xAE, 0x81, 0xFF);
 
 /// Traduce el tema de la configuración a la preferencia de `egui`.
 pub fn preference(theme: Theme) -> egui::ThemePreference {
@@ -208,13 +217,16 @@ pub struct SyntaxColors {
 }
 
 /// Colores del resaltado según el modo.
+///
+/// En modo oscuro se usa la paleta **Monokai** de Sublime Text; en claro, la
+/// paleta Novel con la que se lee bien sobre su fondo.
 pub fn syntax_colors(dark: bool) -> SyntaxColors {
     if dark {
         SyntaxColors {
-            keyword: TN_BLUE,
-            string: TN_GREEN,
-            comment: TN_COMMENT,
-            number: TN_ORANGE,
+            keyword: MONOKAI_KEYWORD,
+            string: MONOKAI_STRING,
+            comment: MONOKAI_COMMENT,
+            number: MONOKAI_NUMBER,
         }
     } else {
         SyntaxColors {
@@ -224,6 +236,39 @@ pub fn syntax_colors(dark: bool) -> SyntaxColors {
             number: NOVEL_ORANGE,
         }
     }
+}
+
+/// Fondo de un bloque de código: Monokai en modo oscuro, el del tema si no.
+pub fn code_background(dark: bool, default: Color32) -> Color32 {
+    if dark {
+        MONOKAI_BG
+    } else {
+        default
+    }
+}
+
+/// Color del texto sin clasificar de un bloque de código.
+pub fn code_text(dark: bool, default: Color32) -> Color32 {
+    if dark {
+        MONOKAI_FG
+    } else {
+        default
+    }
+}
+
+/// Ajusta los colores del tema dentro de un bloque de código.
+///
+/// En modo oscuro deja el contenido como en Sublime Text (texto claro y
+/// separadores y etiquetas en el gris de los comentarios); en claro no cambia
+/// nada, porque la paleta Novel ya es legible sobre su fondo.
+pub fn apply_code_visuals(ui: &mut egui::Ui) {
+    if !ui.visuals().dark_mode {
+        return;
+    }
+    let visuals = ui.visuals_mut();
+    visuals.override_text_color = Some(MONOKAI_FG);
+    visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, MONOKAI_COMMENT);
+    visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, MONOKAI_FG);
 }
 
 fn novel() -> Visuals {
@@ -336,4 +381,34 @@ fn tokyo_night() -> Visuals {
     visuals.menu_corner_radius = egui::CornerRadius::same(8);
 
     visuals
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn los_bloques_en_modo_oscuro_usan_monokai() {
+        let dark = syntax_colors(true);
+        assert_eq!(dark.keyword, Color32::from_rgb(0xF9, 0x26, 0x72));
+        assert_eq!(dark.string, Color32::from_rgb(0xE6, 0xDB, 0x74));
+        assert_eq!(dark.comment, Color32::from_rgb(0x75, 0x71, 0x5E));
+        assert_eq!(dark.number, Color32::from_rgb(0xAE, 0x81, 0xFF));
+
+        assert_eq!(code_background(true, Color32::RED), MONOKAI_BG);
+        assert_eq!(code_text(true, Color32::RED), MONOKAI_FG);
+    }
+
+    #[test]
+    fn el_modo_claro_conserva_la_paleta_novel() {
+        let light = syntax_colors(false);
+        assert_eq!(light.keyword, NOVEL_BLUE);
+        assert_eq!(light.string, NOVEL_GREEN);
+        assert_eq!(light.comment, NOVEL_GRAY);
+        assert_eq!(light.number, NOVEL_ORANGE);
+
+        // El fondo y el texto del bloque se dejan como los del tema claro.
+        assert_eq!(code_background(false, Color32::RED), Color32::RED);
+        assert_eq!(code_text(false, Color32::RED), Color32::RED);
+    }
 }

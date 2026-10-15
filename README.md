@@ -102,7 +102,8 @@ Windows.
 - **Multi-proveedor por sesión**: OpenAI, Anthropic, DeepSeek y OpenRouter.
 - **Prueba de conexión** por proveedor y **proveedor de respaldo** si el activo
   falla (nunca se cambia sin tu consentimiento).
-- **Tema** claro (**Novel**), oscuro (**Tokyo Night**) o el del sistema;
+- **Tema** claro (**Novel**), oscuro (**Tokyo Night**) o el del sistema; los
+  bloques de código en modo oscuro usan el resaltado **Monokai** de Sublime Text;
   **parámetros del RAG** configurables con avisos para valores extremos.
 - **Directorio de datos** configurable con migración de los datos existentes.
 - **Exportar una sesión** a Markdown (con historial, citas y artefactos).
