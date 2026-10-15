@@ -499,7 +499,7 @@ impl RaggyApp {
     fn retriever_options(&self) -> RetrieverOptions {
         RetrieverOptions {
             top_k: self.config.rag.top_k,
-            min_score: self.config.rag.similarity_threshold,
+            relative_floor: self.config.rag.similarity_threshold,
         }
     }
 
@@ -2786,7 +2786,12 @@ impl RaggyApp {
                         );
                         ui.end_row();
 
-                        ui.label("Umbral de similitud");
+                        ui.label("Corte relativo del contexto")
+                            .on_hover_text(
+                                "Fracción del mejor resultado que debe alcanzar un fragmento \
+                                 para usarse como contexto. Bajo = más contexto; alto = más \
+                                 estricto y puede dejar la respuesta sin fuentes.",
+                            );
                         ui.add(
                             egui::DragValue::new(&mut draft.similarity_threshold)
                                 .range(
@@ -3424,8 +3429,8 @@ impl RaggyApp {
             Ok(results) => {
                 self.search_note = Some(if results.is_empty() {
                     format!(
-                        "No se encontraron fragmentos por encima del umbral ({:.2}).",
-                        options.min_score
+                        "No se encontró ningún fragmento relacionado (corte relativo {:.2}).",
+                        options.relative_floor
                     )
                 } else {
                     format!("{} fragmentos recuperados.", results.len())

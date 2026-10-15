@@ -112,7 +112,16 @@ pub fn search_folder(
     }
 
     let retriever = build_retriever(storage, folder_id, embedding_dimensions)?;
-    Ok(retriever.retrieve(query, options))
+    let results = retriever.retrieve(query, options);
+    // Diagnóstico: permite ver por qué una respuesta se queda sin contexto.
+    tracing::debug!(
+        folder_id,
+        candidatos = results.len(),
+        mejor = results.first().map(|result| result.score).unwrap_or(0.0),
+        corte_relativo = options.relative_floor,
+        "recuperación de contexto"
+    );
+    Ok(results)
 }
 
 /// Construye el recuperador híbrido a partir de los fragmentos almacenados.
@@ -179,7 +188,7 @@ mod tests {
         let mut cache = SearchCache::default();
         let options = RetrieverOptions {
             top_k: 5,
-            min_score: 0.01,
+            relative_floor: 0.01,
         };
         let initial = cache
             .search_folder(&storage, &folder.id, "alfa", &options, 32)

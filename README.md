@@ -53,7 +53,8 @@ Windows.
 ### Búsqueda con recuperación híbrida
 - **Embeddings locales** deterministas, sin modelos ni conexión a internet.
 - Índice vectorial (similitud coseno) + índice léxico **BM25 normalizado por la
-  consulta**, fusionados con un umbral configurable. El recuperador se mantiene
+  consulta**, fusionados con un **corte relativo al mejor resultado** (nunca se
+  descarta el fragmento más relevante). El recuperador se mantiene
   en caché por carpeta y se renueva al reindexar.
 - Buscador que muestra los fragmentos más relevantes con su puntuación y su cita
   (`archivo.md (líneas 12-20)`) y abre el fragmento exacto al seleccionarlo.
@@ -198,6 +199,10 @@ Todo vive en la **carpeta base** `~/.raggydesktop/`:
   "api_keys": {}
 }
 ```
+
+`similarity_threshold` es un **corte relativo** (0.0–1.0): se conservan los
+fragmentos cuya puntuación alcanza al menos esa fracción de la mejor de la
+consulta. Un valor bajo aporta más contexto; uno alto es más estricto.
 
 Las claves se pueden introducir desde la interfaz (se guardan en `api_keys`) o
 dejarse fuera y usar las variables de entorno `OPENAI_API_KEY`,

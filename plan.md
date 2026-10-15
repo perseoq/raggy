@@ -74,7 +74,8 @@ Software de escritorio con interfaz gráfica moderna, escrito en Rust, que funci
 - Re-ranking opcional para mejorar precisión.
 - Inyección de fragmentos con citas verificables de archivo y ubicación nativa
   (líneas, página, diapositiva o coordenadas de hoja/celdas).
-- Umbral mínimo de similitud para descartar contexto irrelevante.
+- Umbral relativo: el contexto se acota respecto al mejor resultado, sin
+  descartar nunca el fragmento más relevante.
 
 ### 5.4 Motor de Chat
 - Streaming de respuestas token a token.
@@ -169,7 +170,7 @@ Software de escritorio con interfaz gráfica moderna, escrito en Rust, que funci
 
 | Riesgo | Mitigación |
 |---|---|
-| Alucinaciones del modelo | Temperatura 0.1, prompt estricto, citas obligatorias, umbral de similitud |
+| Alucinaciones del modelo | Temperatura 0.1, prompt estricto, citas obligatorias, corte relativo al mejor resultado |
 | Calidad del chunking | Chunking semántico por encabezados y respeto de bloques de código |
 | Costos de API | Selección de modelos económicos, cacheo de embeddings, límite de tokens |
 | Fuga de claves | Cifrado local y nunca mostrarlas completas en UI |

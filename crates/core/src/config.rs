@@ -59,7 +59,9 @@ pub struct RagConfig {
     pub chunk_overlap: usize,
     /// Número de fragmentos recuperados por consulta.
     pub top_k: usize,
-    /// Umbral mínimo de similitud para descartar ruido.
+    /// Corte relativo al mejor resultado (0.0..=1.0): se conservan las
+    /// coincidencias cuya puntuación sea al menos esta fracción de la mejor.
+    /// Bajo = más contexto (más permisivo), alto = más estricto.
     pub similarity_threshold: f32,
     /// Dimensionalidad de los embeddings locales.
     pub embedding_dimensions: usize,
@@ -71,7 +73,7 @@ impl Default for RagConfig {
             chunk_size: raggy_rag::DEFAULT_CHUNK_SIZE,
             chunk_overlap: raggy_rag::DEFAULT_CHUNK_OVERLAP,
             top_k: raggy_rag::DEFAULT_TOP_K,
-            similarity_threshold: raggy_rag::DEFAULT_MIN_SCORE,
+            similarity_threshold: raggy_rag::DEFAULT_RELATIVE_FLOOR,
             embedding_dimensions: raggy_rag::DEFAULT_EMBEDDING_DIMENSIONS,
         }
     }
@@ -97,10 +99,16 @@ impl RagConfig {
                 .push("Recuperar más de 20 fragmentos suele degradar la precisión.".to_string());
         }
         if self.similarity_threshold < SIMILARITY_WARNING_MIN {
-            warnings.push("Un umbral muy bajo dejará pasar contexto poco relevante.".to_string());
+            warnings.push(
+                "Un corte relativo muy bajo aporta casi todos los fragmentos, incluidos los poco relevantes."
+                    .to_string(),
+            );
         }
         if self.similarity_threshold > SIMILARITY_WARNING_MAX {
-            warnings.push("Un umbral muy alto puede descartar contexto útil.".to_string());
+            warnings.push(
+                "Un corte relativo muy alto puede descartar fragmentos útiles y dejar la respuesta sin contexto."
+                    .to_string(),
+            );
         }
         if self.embedding_dimensions < EMBEDDING_WARNING_MIN {
             warnings.push(

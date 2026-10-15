@@ -11,7 +11,18 @@ use crate::vector::VectorIndex;
 
 /// Valores estándar de recuperación para consultas nuevas.
 pub const DEFAULT_TOP_K: usize = 5;
-pub const DEFAULT_MIN_SCORE: f32 = 0.3;
+
+/// Fracción del mejor resultado que debe alcanzar una coincidencia para entrar
+/// en el contexto (0.0 = todo, 1.0 = solo el mejor). Un corte relativo evita
+/// descartar la respuesta correcta cuando la escala absoluta de la consulta es
+/// baja, algo habitual con los embeddings locales.
+pub const DEFAULT_RELATIVE_FLOOR: f32 = 0.3;
+
+/// Puntuación absoluta mínima para considerar que existe alguna señal. Solo
+/// descarta resultados con coincidencia prácticamente nula; no se usa para
+/// juzgar relevancia, porque las consultas sin relación pueden puntuar en un
+/// rango parecido al de las relacionadas.
+pub const MIN_ABSOLUTE_SCORE: f32 = 0.02;
 
 /// Cita verificable de un fragmento (HU-11).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -130,15 +141,16 @@ impl RetrievedChunk {
 pub struct RetrieverOptions {
     /// Número máximo de fragmentos a devolver.
     pub top_k: usize,
-    /// Umbral mínimo de la puntuación combinada para descartar ruido.
-    pub min_score: f32,
+    /// Corte **relativo** al mejor resultado: se conservan las coincidencias cuya
+    /// puntuación combinada sea al menos esta fracción de la mejor (0.0..=1.0).
+    pub relative_floor: f32,
 }
 
 impl Default for RetrieverOptions {
     fn default() -> Self {
         Self {
             top_k: DEFAULT_TOP_K,
-            min_score: DEFAULT_MIN_SCORE,
+            relative_floor: DEFAULT_RELATIVE_FLOOR,
         }
     }
 }
@@ -287,8 +299,15 @@ impl Retriever for HybridRetriever {
                     lexical_score,
                 })
             })
-            .filter(|result| result.score >= options.min_score)
+            .filter(|result| result.score >= MIN_ABSOLUTE_SCORE)
             .collect();
+
+        // El corte es relativo al mejor resultado: si hay alguna coincidencia,
+        // nunca se descarta la mejor por un umbral absoluto mal calibrado.
+        if let Some(best) = results.iter().map(|result| result.score).reduce(f32::max) {
+            let floor = (best * options.relative_floor.clamp(0.0, 1.0)).max(MIN_ABSOLUTE_SCORE);
+            results.retain(|result| result.score >= floor);
+        }
 
         results.sort_by(|a, b| {
             b.score
@@ -387,7 +406,7 @@ mod tests {
         let retriever = retriever();
         let options = RetrieverOptions {
             top_k: 3,
-            min_score: 0.1,
+            relative_floor: 0.1,
         };
         let results = retriever.retrieve("indexación incremental de archivos", &options);
         assert!(!results.is_empty());
@@ -396,11 +415,11 @@ mod tests {
     }
 
     #[test]
-    fn respeta_el_umbral_y_top_k() {
+    fn respeta_el_corte_relativo_y_top_k() {
         let retriever = retriever();
         let strict = RetrieverOptions {
             top_k: 1,
-            min_score: 0.95,
+            relative_floor: 0.95,
         };
         let results = retriever.retrieve("streaming token a token", &strict);
         assert!(results.len() <= 1);
@@ -411,10 +430,36 @@ mod tests {
         let retriever = retriever();
         let options = RetrieverOptions {
             top_k: 5,
-            min_score: 0.8,
+            relative_floor: 0.8,
         };
         let results = retriever.retrieve("zeppelin fotosíntesis cuántica", &options);
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn el_corte_relativo_no_descarta_la_mejor_coincidencia() {
+        // Fragmento cuya puntuación combinada es baja en términos absolutos
+        // (~0.2): con un umbral absoluto de 0.3 se perdería, pero al ser el
+        // mejor resultado debe conservarse.
+        let mut retriever = retriever();
+        retriever.add(
+            chunk(
+                "d",
+                "cada persona dispone de 23 dias laborables de descanso al ano",
+            ),
+            None,
+        );
+
+        let options = RetrieverOptions::default();
+        let results = retriever.retrieve("¿cuántos días de descanso tengo al año?", &options);
+
+        assert!(!results.is_empty(), "debe devolver el mejor candidato");
+        assert_eq!(results[0].chunk.id, "d");
+        assert!(
+            results[0].score < 0.3,
+            "el caso reproduce una puntuación baja: {}",
+            results[0].score
+        );
     }
 
     #[test]
@@ -425,7 +470,7 @@ mod tests {
 
         let options = RetrieverOptions {
             top_k: 3,
-            min_score: 0.1,
+            relative_floor: 0.1,
         };
         let results = retriever.retrieve("bm25", &options);
         assert_eq!(results.len(), 1);

@@ -10,6 +10,30 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.2.1] - 2026-10-15
+
+### Corregido
+
+- **Recuperación de contexto**: el corte de fragmentos era un umbral absoluto
+  (0.3) sobre una puntuación combinada cuya escala real suele estar entre 0.2 y
+  0.5, así que descartaba el mejor resultado en preguntas naturales y el modelo
+  respondía «no encuentro esa información» aunque el dato estuviera indexado. Ahora
+  el corte es **relativo al mejor resultado** (fracción configurable), de modo que
+  nunca se descarta el fragmento más relevante; solo se descarta la consulta
+  cuando no hay ninguna señal.
+- Se añade una prueba de regresión que indexa documentos y verifica que varias
+  preguntas naturales recuperan su documento con la configuración por defecto.
+- Se registra en el log de depuración cuántos fragmentos se recuperan y su mejor
+  puntuación, para diagnosticar respuestas sin contexto.
+
+### Cambiado
+
+- `RetrieverOptions::min_score` pasa a `relative_floor` (fracción 0.0–1.0); el
+  campo `similarity_threshold` de `settings.json` conserva su nombre pero ahora se
+  interpreta como corte relativo.
+- El aviso de contexto vacío del prompt invita a reformular la búsqueda en vez de
+  dar por hecho que la información no existe.
+
 ## [2.2.0] - 2026-10-14
 
 ### Añadido

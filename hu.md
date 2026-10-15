@@ -146,8 +146,9 @@ documentos soportados,
 
 **Criterios de aceptación:**
 - Se recuperan top-K fragmentos (configurable, por defecto 5).
-- Se aplica umbral mínimo de similitud para descartar ruido.
-- Si no hay fragmentos por encima del umbral, el sistema lo indica al usuario.
+- El contexto se acota con un corte **relativo al mejor resultado**, de modo que
+  nunca se descarta el fragmento más relevante de la consulta.
+- Si no hay ninguna coincidencia, el sistema lo indica al usuario.
 - Los fragmentos se inyectan con cita de archivo y línea.
 
 ---
@@ -369,11 +370,12 @@ documentos soportados,
 
 ### HU-27: Configurar parámetros del RAG
 **Como** usuario avanzado,
-**quiero** ajustar tamaño de chunk, top-K y umbral de similitud,
+**quiero** ajustar tamaño de chunk, top-K y el corte de contexto,
 **para** afinar la calidad del retrieval según mis documentos.
 
 **Criterios de aceptación:**
 - Panel avanzado con estos parámetros.
+- El corte de contexto es relativo al mejor resultado (fracción 0.0–1.0).
 - Valores por defecto sensatos y documentados.
 - Cambios aplican a nuevas indexaciones o requieren reindexar (según parámetro).
 - Se advierte si el usuario elige valores extremos.

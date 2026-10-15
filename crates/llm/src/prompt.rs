@@ -92,8 +92,9 @@ pub fn build_system_prompt(context: &[ContextBlock], artifacts: &[ArtifactContex
 
     if context.is_empty() {
         prompt.push_str(
-            "\n\nNo se recuperó ningún fragmento relevante del índice; si no puedes \
-             responder con lo anterior, indica que no encuentras la información.",
+            "\n\nNo se recuperó ningún fragmento del índice para esta pregunta. Si el \
+             contexto anterior no basta para responder, dilo e invita a reformular la \
+             búsqueda con otras palabras; no inventes datos.",
         );
     } else {
         prompt.push_str("\n\nContexto recuperado:\n");

@@ -173,7 +173,7 @@ fn la_busqueda_encuentra_el_fragmento_relevante() {
 
     let options = RetrieverOptions {
         top_k: 3,
-        min_score: 0.2,
+        relative_floor: 0.2,
     };
     let results = raggy_core::search_folder(
         &storage,
@@ -187,19 +187,33 @@ fn la_busqueda_encuentra_el_fragmento_relevante() {
     assert!(!results.is_empty(), "debería haber resultados");
     assert_eq!(results[0].chunk.metadata.source_path, "indexacion.md");
 
-    let strict = RetrieverOptions {
-        top_k: 3,
-        min_score: 0.95,
-    };
-    let none = raggy_core::search_folder(
+    // Nota: con embeddings locales, una consulta sin relación puede compartir
+    // palabras vacías y puntuar en un rango parecido; por eso no se exige que
+    // devuelva cero, sino que el corte relativo ordene y acote el contexto.
+    let consulta_rara = raggy_core::search_folder(
         &storage,
         &folder.id,
-        "zeppelin sobre fotosíntesis cuántica",
-        &strict,
+        "zeppelin fotosíntesis cuántica",
+        &RetrieverOptions::default(),
         128,
     )
     .expect("busca sin coincidencias");
-    assert!(none.is_empty(), "el umbral alto no debería devolver nada");
+    assert!(consulta_rara.len() <= raggy_rag::DEFAULT_TOP_K);
+
+    // Con un corte relativo alto solo sobrevive el mejor resultado.
+    let estricto = RetrieverOptions {
+        top_k: 3,
+        relative_floor: 0.95,
+    };
+    let solo_mejor = raggy_core::search_folder(
+        &storage,
+        &folder.id,
+        "reindexación incremental de archivos",
+        &estricto,
+        128,
+    )
+    .expect("busca con corte estricto");
+    assert_eq!(solo_mejor.len(), 1, "el corte estricto deja solo el mejor");
 
     // Los archivos de código también se indexan y se recuperan.
     let code = raggy_core::search_folder(

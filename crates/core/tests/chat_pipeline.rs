@@ -49,7 +49,7 @@ fn index_options() -> IndexOptions {
 fn retriever_options() -> RetrieverOptions {
     RetrieverOptions {
         top_k: 4,
-        min_score: 0.15,
+        relative_floor: 0.15,
     }
 }
 
