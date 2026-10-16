@@ -10,6 +10,15 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.2.18] - 2026-10-15
+
+### Corregido
+
+- El panel lateral de fragmentos y la lista de resultados ya **no muestran la
+  correspondencia de columnas** (`Columnas: A=rfc, B=razon_social, …`) que llevan
+  los fragmentos de tablas: esa línea sigue en el fragmento para que el modelo
+  interprete la fila, pero en la interfaz se oculta y se ve solo la fila.
+
 ## [2.2.17] - 2026-10-15
 
 ### Corregido

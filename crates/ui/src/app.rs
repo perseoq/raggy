@@ -2235,7 +2235,7 @@ impl RaggyApp {
                         if ui.selectable_label(false, label).clicked() {
                             actions.push(CentralAction::OpenCitation(citation));
                         }
-                        ui.small(snippet(&result.chunk.content));
+                        ui.small(snippet(&chunk_display_text(&result.chunk.content)));
                         ui.add_space(6.0);
                     }
                 });
@@ -2748,8 +2748,10 @@ impl RaggyApp {
                             ui.small(format!("Encabezado: {heading}"));
                         }
                         ui.add(
-                            egui::Label::new(egui::RichText::new(&chunk.content).monospace())
-                                .wrap(),
+                            egui::Label::new(
+                                egui::RichText::new(chunk_display_text(&chunk.content)).monospace(),
+                            )
+                            .wrap(),
                         );
                         ui.separator();
                     }
@@ -4085,6 +4087,22 @@ fn human_size(bytes: i64) -> String {
 }
 
 /// Extrae la primera línea con contenido de un fragmento, recortada.
+/// Texto de un fragmento tal como se muestra en el panel lateral.
+///
+/// Los fragmentos de tablas llevan delante la correspondencia de columnas
+/// (`Columnas: A=rfc, B=razon_social, …`) para que el modelo interprete la fila
+/// sin contexto previo; en la interfaz es ruido, así que se oculta y se muestra
+/// solo la fila.
+fn chunk_display_text(content: &str) -> String {
+    content
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("Columnas: "))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
 fn snippet(content: &str) -> String {
     let line = content
         .lines()
@@ -4707,8 +4725,8 @@ fn push_plain(tokens: &mut Vec<Token>, plain: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::{
-        human_size, location_range, mismo_lugar, short_timestamp, snippet, tokenize_code, Chunk,
-        Citation, TokenKind,
+        chunk_display_text, human_size, location_range, mismo_lugar, short_timestamp, snippet,
+        tokenize_code, Chunk, Citation, TokenKind,
     };
     use raggy_rag::ChunkMetadata;
 
@@ -4760,6 +4778,23 @@ mod tests {
         assert!(sql
             .iter()
             .any(|token| token.kind == TokenKind::Comment && token.text.starts_with("--")));
+    }
+
+    #[test]
+    fn oculta_la_correspondencia_de_columnas_al_mostrar_un_fragmento() {
+        let contenido = "Columnas: A=rfc, B=razon_social, C=nombre_comercial\n\
+                         1460 | COM250315S5U | Tecnología Reyes Grupo e.U.";
+        assert_eq!(
+            chunk_display_text(contenido),
+            "1460 | COM250315S5U | Tecnología Reyes Grupo e.U.",
+            "se muestra la fila, no la cabecera de columnas"
+        );
+        // Un fragmento de prosa se muestra tal cual.
+        assert_eq!(
+            chunk_display_text("texto normal\nmas texto"),
+            "texto normal\nmas texto"
+        );
+        assert_eq!(chunk_display_text("Columnas: A=x\n"), "");
     }
 
     #[test]
