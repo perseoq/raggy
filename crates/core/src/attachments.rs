@@ -226,6 +226,88 @@ pub fn clear_attachments(storage: &mut Storage, session_id: &str, directory: &Pa
     Ok(())
 }
 
+/// Reindexa los adjuntos cuyo índice se hizo con otro pipeline.
+///
+/// Es el equivalente de la reindexación automática de carpetas para los archivos
+/// adjuntos a los chats: si cambió la versión del pipeline, las opciones de
+/// ingesta o las herramientas externas, el adjunto almacenado se vuelve a
+/// extraer y trocear. Devuelve cuántos adjuntos se reindexaron.
+pub fn reindex_stale_attachments(
+    storage: &mut Storage,
+    attachments_root: &Path,
+    options: &IndexOptions,
+) -> Result<usize> {
+    let current = processing_fingerprint(options);
+    let mut reindexed = 0usize;
+
+    let folders = storage.list_folders()?;
+    for folder in folders {
+        let sessions = storage.list_sessions(&folder.id)?;
+        for session in sessions {
+            let directory = attachments_root.join(&session.id);
+            let documents = storage.list_session_documents(&session.id)?;
+            for document in documents {
+                if document.processing_hash == current {
+                    continue;
+                }
+                let Some(path) = attachment_path(&directory, &document.relative_path) else {
+                    continue;
+                };
+                if !path.is_file() {
+                    // Sin archivo almacenado no hay nada que reindexar.
+                    continue;
+                }
+                let bytes = match read_file_limited(&path, MAX_ATTACHMENT_BYTES) {
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        tracing::warn!(
+                            path = %path.display(),
+                            "no se pudo releer el adjunto: {error}"
+                        );
+                        continue;
+                    }
+                };
+
+                let (chunks, warnings) =
+                    match chunk_file(&path, &document.relative_path, &bytes, options) {
+                        Ok(result) => result,
+                        Err(error) => {
+                            tracing::warn!(
+                                path = %path.display(),
+                                "no se pudo reindexar el adjunto: {error}"
+                            );
+                            continue;
+                        }
+                    };
+                for warning in &warnings {
+                    tracing::warn!(path = %path.display(), "{warning}");
+                }
+
+                let embeddings = embed_chunks(&chunks, options.embedding_dimensions);
+                let updated = Document::for_session(
+                    &session.id,
+                    document.relative_path.clone(),
+                    document.content_hash.clone(),
+                    current.clone(),
+                    document.size_bytes,
+                    modified_millis(&path),
+                    chunks.len() as i64,
+                );
+                storage.replace_file_index(
+                    IndexOwner::Session(&session.id),
+                    &document.relative_path,
+                    &chunks,
+                    &embeddings,
+                    &updated,
+                )?;
+                reindexed += 1;
+            }
+        }
+    }
+
+    Ok(reindexed)
+}
+
 /// Ruta física de un adjunto dentro de la carpeta de su sesión.
 pub fn attachment_path(directory: &Path, relative_path: &str) -> Option<PathBuf> {
     crate::artifacts::sanitize_relative(relative_path).map(|relative| directory.join(relative))
@@ -519,5 +601,52 @@ mod tests {
         assert_eq!(sanitize_name("carpeta/informe.md"), "carpeta_informe.md");
         assert_eq!(sanitize_name("   "), "adjunto");
         assert_eq!(sanitize_name(".oculto.md"), "oculto.md");
+    }
+
+    #[test]
+    fn reindexa_solo_los_adjuntos_con_el_pipeline_anticuado() {
+        let (mut storage, session_id, directory) = sesion_de_prueba("reindexa");
+        let origin = temp_dir("reindexa-origen");
+        let informe = origin.join("informe.md");
+        let texto = format!(
+            "# Informe\n\n{}",
+            "Parrafo de relleno con texto suficiente para trocear. ".repeat(40)
+        );
+        std::fs::write(&informe, texto).expect("escribe el adjunto");
+
+        let original = IndexOptions::default();
+        attach_files(
+            &mut storage,
+            &session_id,
+            &directory,
+            std::slice::from_ref(&informe),
+            &original,
+        )
+        .expect("adjunta");
+
+        let root = directory.parent().expect("raíz de adjuntos").to_path_buf();
+        assert_eq!(
+            reindex_stale_attachments(&mut storage, &root, &original).expect("reindexa"),
+            0,
+            "con el mismo pipeline no hay nada que rehacer"
+        );
+
+        let mut nuevo = original.clone();
+        nuevo.chunking.max_chars /= 2;
+        assert_eq!(
+            reindex_stale_attachments(&mut storage, &root, &nuevo).expect("reindexa"),
+            1,
+            "el adjunto desfasado se reindexa"
+        );
+
+        let documentos = storage.list_session_documents(&session_id).expect("lista");
+        assert_eq!(documentos.len(), 1, "no se duplica el adjunto");
+        assert_eq!(
+            documentos[0].processing_hash,
+            processing_fingerprint(&nuevo),
+            "queda marcado con la huella nueva"
+        );
+
+        let _ = std::fs::remove_dir_all(&origin);
     }
 }

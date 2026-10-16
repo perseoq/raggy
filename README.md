@@ -51,10 +51,10 @@ Windows.
   bloque nunca se parte) y guarda archivo, ruta, encabezado padre y ubicación
   nativa del formato.
 - **Reindexación incremental** por hash del archivo y huella de opciones del
-  pipeline: al arrancar, las carpetas cuyo índice se hizo con **otro pipeline**
-  (otra versión de la app, otras opciones de ingesta u herramientas de OCR y
-  conversión recién instaladas) se **reindexan solas**, sin tocar las que ya están
-  al día.
+  pipeline: al arrancar, las carpetas y los **adjuntos de los chats** cuyo índice
+  se hizo con **otro pipeline** (otra versión de la app, otras opciones de ingesta
+  u herramientas de OCR y conversión recién instaladas) se **reindexan solos**, sin
+  tocar los que ya están al día.
 - **Vigilancia automática** de la carpeta: al cambiar un archivo se reindexa solo.
 - La indexación corre en segundo plano: la interfaz nunca se bloquea.
 

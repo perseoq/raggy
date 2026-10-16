@@ -10,6 +10,22 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.2.17] - 2026-10-15
+
+### Corregido
+
+- Al pulsar una **fuente** de un mensaje ya no puede quedar sin abrir el panel: si
+  la cita se guardó con **otro troceado** (por ejemplo, antes de indexar las tablas
+  fila a fila), la coincidencia exacta falla; ahora se localiza el fragmento actual
+  de la misma zona comparando la ubicación (fila, líneas, página o diapositiva) y el
+  panel muestra ese fragmento, con un aviso de que la cita venía de otro índice.
+
+### Añadido
+
+- Los **adjuntos de los chats** también se **reindexan solos al arrancar** cuando su
+  huella de pipeline está desfasada (`reindex_stale_attachments`), igual que las
+  carpetas; así una actualización no deja los adjuntos con el troceado antiguo.
+
 ## [2.2.16] - 2026-10-15
 
 ### Corregido

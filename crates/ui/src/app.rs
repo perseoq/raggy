@@ -388,9 +388,10 @@ impl RaggyApp {
         app.refresh_keys();
 
         // Si el índice se hizo con otro pipeline (otra versión de la app, otras
-        // opciones de ingesta o herramientas recién instaladas), se reindexa solo.
+        // opciones de ingesta o herramientas recién instaladas), se reindexa solo;
+        // vale para las carpetas y para los adjuntos de los chats.
         if let Some(worker) = &app.worker {
-            worker.reindex_stale(app.index_options());
+            worker.reindex_stale(app.index_options(), app.paths.attachments_dir());
         }
 
         app
@@ -728,43 +729,79 @@ impl RaggyApp {
         }
     }
 
-    /// Busca el fragmento exacto al que apunta una cita.
+    /// Busca el fragmento al que apunta una cita.
     ///
     /// La cita puede venir de la carpeta indexada o de un archivo adjunto al
-    /// chat, así que se consultan ambos orígenes.
+    /// chat. Si el índice se reindexó con otro troceado (por ejemplo, antes de
+    /// indexar las tablas fila a fila), la cita guardada ya no coincide con
+    /// ningún fragmento: se busca entonces el fragmento actual de la misma zona.
     fn cited_chunk(&self, citation: &Citation) -> Option<Chunk> {
-        let storage = self.storage.as_ref()?;
-        if let Some(folder_id) = self.selected_folder.as_deref() {
-            if let Ok(chunks) = storage.list_chunks_for_path(folder_id, &citation.source_path) {
-                if let Some(chunk) = chunks
-                    .into_iter()
-                    .find(|chunk| citation.matches_chunk(chunk))
-                {
-                    return Some(chunk);
-                }
-            }
+        let folder_chunks = self.chunks_of_source(citation, false);
+        if let Some(chunk) = folder_chunks
+            .iter()
+            .find(|chunk| citation.matches_chunk(chunk))
+        {
+            return Some(chunk.clone());
         }
-        if let Some(session_id) = self.active_session.as_ref().map(|session| &session.id) {
-            if let Ok(chunks) =
-                storage.list_session_chunks_for_path(session_id, &citation.source_path)
-            {
-                return chunks
-                    .into_iter()
-                    .find(|chunk| citation.matches_chunk(chunk));
-            }
+        if let Some(chunk) = folder_chunks
+            .iter()
+            .find(|chunk| mismo_lugar(citation, chunk))
+        {
+            return Some(chunk.clone());
         }
-        None
+
+        let session_chunks = self.chunks_of_source(citation, true);
+        if let Some(chunk) = session_chunks
+            .iter()
+            .find(|chunk| citation.matches_chunk(chunk))
+        {
+            return Some(chunk.clone());
+        }
+        session_chunks
+            .into_iter()
+            .find(|chunk| mismo_lugar(citation, chunk))
     }
 
-    /// Abre el panel lateral con **solo** el fragmento al que apunta la cita.
+    /// Fragmentos de un origen (carpeta o adjuntos) para la ruta de la cita.
+    fn chunks_of_source(&self, citation: &Citation, attachment: bool) -> Vec<Chunk> {
+        let Some(storage) = self.storage.as_ref() else {
+            return Vec::new();
+        };
+        if attachment {
+            let Some(session_id) = self.active_session.as_ref().map(|session| &session.id) else {
+                return Vec::new();
+            };
+            storage
+                .list_session_chunks_for_path(session_id, &citation.source_path)
+                .unwrap_or_default()
+        } else {
+            let Some(folder_id) = self.selected_folder.as_deref() else {
+                return Vec::new();
+            };
+            storage
+                .list_chunks_for_path(folder_id, &citation.source_path)
+                .unwrap_or_default()
+        }
+    }
+
+    /// Abre el panel lateral con el fragmento al que apunta la cita.
     fn open_citation(&mut self, citation: &Citation) {
         match self.cited_chunk(citation) {
             Some(chunk) => {
+                let exact = citation.matches_chunk(&chunk);
+                // El título es el del fragmento que se muestra de verdad, para que
+                // no anuncie una ubicación que ya no corresponde.
+                self.chunks_panel_title = Citation::from_chunk(&chunk, 0.0).label();
                 self.selected_document = Some(citation.source_path.clone());
                 self.selected_chunk_id = Some(chunk.id.clone());
                 self.chunks_preview = vec![chunk];
-                self.chunks_panel_title = citation.label();
                 self.chunks_panel_open = true;
+                if !exact {
+                    self.status = format!(
+                        "La cita se guardó con otro índice; se muestra el fragmento actual de {}.",
+                        citation.label()
+                    );
+                }
             }
             None => {
                 self.status = format!(
@@ -1758,6 +1795,14 @@ impl RaggyApp {
                         entry.error = Some(message.clone());
                     }
                     self.status = format!("Indexación fallida: {message}");
+                }
+                IndexEvent::AttachmentsReindexed { count } => {
+                    // Los adjuntos se reindexaron con otro pipeline: la caché de
+                    // búsqueda por sesión queda obsoleta.
+                    self.search_cache = SearchCache::default();
+                    self.status = format!(
+                        "{count} adjunto(s) de los chats reindexados con el pipeline nuevo."
+                    );
                 }
             }
         }
@@ -4313,6 +4358,63 @@ fn render_code_blocks(
     }
 }
 
+/// ¿La cita y el fragmento se refieren a la misma zona del documento?
+///
+/// Sirve de respaldo cuando la cita se guardó con otro troceado: los números de
+/// línea cambian y la coincidencia exacta falla, pero la ubicación (fila, líneas,
+/// página o diapositiva) sigue señalando el mismo lugar.
+fn mismo_lugar(citation: &Citation, chunk: &Chunk) -> bool {
+    let cited = citation.location.as_deref().and_then(location_range);
+    let found = chunk.metadata.location.as_deref().and_then(location_range);
+    match (cited, found) {
+        (Some((cited_kind, cited_first, cited_last)), Some((kind, first, last))) => {
+            cited_kind == kind && cited_first <= last && first <= cited_last
+        }
+        _ => false,
+    }
+}
+
+/// Rango numérico de la ubicación de una cita, con su tipo.
+///
+/// Entiende los formatos que genera la app: `líneas 10-24`, `página 7`,
+/// `diapositiva 3`, `hoja Ventas, A2:D20`, `hoja 1, fila 2669` y
+/// `hoja 1, filas 2-5`. Devuelve `None` cuando no hay números (p. ej. `hoja 1`).
+fn location_range(location: &str) -> Option<(&'static str, usize, usize)> {
+    let text = location.trim();
+    if let Some(rest) = text.strip_prefix("líneas ") {
+        return two_numbers(rest).map(|(first, last)| ("líneas", first, last));
+    }
+    if let Some(rest) = text.strip_prefix("página ") {
+        return one_number(rest).map(|number| ("página", number, number));
+    }
+    if let Some(rest) = text.strip_prefix("diapositiva ") {
+        return one_number(rest).map(|number| ("diapositiva", number, number));
+    }
+
+    // Tablas: se toma lo que sigue a la hoja (`hoja Ventas, A2:D20`).
+    let cells = text.split_once(',').map_or("", |(_, cells)| cells).trim();
+    if let Some(rest) = cells.strip_prefix("fila ") {
+        return one_number(rest).map(|row| ("fila", row, row));
+    }
+    if let Some(rest) = cells.strip_prefix("filas ") {
+        return two_numbers(rest).map(|(first, last)| ("fila", first, last));
+    }
+    let (first, last) = cells.split_once(':')?;
+    Some(("fila", one_number(first)?, one_number(last)?))
+}
+
+/// Extrae el primer número de un texto (`A2669` → `2669`).
+fn one_number(text: &str) -> Option<usize> {
+    let digits: String = text.chars().filter(char::is_ascii_digit).collect();
+    digits.parse().ok()
+}
+
+/// Extrae dos números separados por un guion (`2-5` → `(2, 5)`).
+fn two_numbers(text: &str) -> Option<(usize, usize)> {
+    let (first, last) = text.split_once('-')?;
+    Some((one_number(first)?, one_number(last)?))
+}
+
 /// Categoría de un token para el resaltado de sintaxis.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TokenKind {
@@ -4604,7 +4706,11 @@ fn push_plain(tokens: &mut Vec<Token>, plain: &mut String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{human_size, short_timestamp, snippet, tokenize_code, TokenKind};
+    use super::{
+        human_size, location_range, mismo_lugar, short_timestamp, snippet, tokenize_code, Chunk,
+        Citation, TokenKind,
+    };
+    use raggy_rag::ChunkMetadata;
 
     #[test]
     fn abrevia_marcas_de_tiempo() {
@@ -4654,5 +4760,60 @@ mod tests {
         assert!(sql
             .iter()
             .any(|token| token.kind == TokenKind::Comment && token.text.starts_with("--")));
+    }
+
+    #[test]
+    fn reconoce_el_rango_de_una_ubicacion() {
+        assert_eq!(location_range("líneas 10-24"), Some(("líneas", 10, 24)));
+        assert_eq!(location_range("página 7"), Some(("página", 7, 7)));
+        assert_eq!(location_range("diapositiva 3"), Some(("diapositiva", 3, 3)));
+        assert_eq!(
+            location_range("hoja Ventas, A2:D20"),
+            Some(("fila", 2, 20)),
+            "un rango de celdas son filas de la 2 a la 20"
+        );
+        assert_eq!(
+            location_range("hoja 1, fila 2669"),
+            Some(("fila", 2669, 2669))
+        );
+        assert_eq!(location_range("hoja 1, filas 2-5"), Some(("fila", 2, 5)));
+        assert_eq!(location_range("hoja 1"), None);
+    }
+
+    #[test]
+    fn localiza_el_fragmento_actual_de_una_cita_antigua() {
+        // Cita guardada con el troceado viejo (tres filas) y fragmento nuevo (una).
+        let citation = Citation {
+            source_file: "ventas.csv".to_string(),
+            source_path: "ventas.csv".to_string(),
+            heading: None,
+            location: Some("hoja 1, A2088:N2090".to_string()),
+            start_line: 2090,
+            end_line: 2092,
+            score: 0.0,
+        };
+        let chunk = |location: &str| Chunk {
+            id: "c".to_string(),
+            content_hash: "h".to_string(),
+            content: "2090 | V-2025-02089".to_string(),
+            metadata: ChunkMetadata {
+                source_file: "ventas.csv".to_string(),
+                source_path: "ventas.csv".to_string(),
+                heading: None,
+                location: Some(location.to_string()),
+                start_line: 4180,
+                end_line: 4180,
+            },
+        };
+
+        assert!(mismo_lugar(&citation, &chunk("hoja 1, fila 2090")));
+        assert!(
+            !mismo_lugar(&citation, &chunk("hoja 1, fila 4")),
+            "una fila lejana no es la misma zona"
+        );
+        assert!(
+            !mismo_lugar(&citation, &chunk("página 1")),
+            "una página no se compara con filas"
+        );
     }
 }

@@ -49,7 +49,8 @@ A continuación, las tecnologías necesarias para construir este software, todas
   se renuevan cuando cambia la revisión del índice o la de los adjuntos.
 - **Reindexación automática por huella**: al arrancar se compara la huella de
   procesamiento de cada documento con la vigente (`folder_needs_reindex`) y se
-  reindexan solo las carpetas desfasadas, sin bloquear la interfaz.
+  reindexan solo las carpetas desfasadas, sin bloquear la interfaz. Los **adjuntos
+  de los chats** siguen el mismo criterio (`reindex_stale_attachments`).
 - El recuperador fusiona BM25 normalizado y similitud vectorial. Los parámetros
   de BM25, el peso vectorial y la amplitud del pool se pueden ajustar mediante
   `HybridRetrieverOptions`. La tokenización descarta palabras vacías en español e

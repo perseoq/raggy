@@ -536,6 +536,8 @@ pub enum IndexCommand {
     ReindexStale {
         /// Opciones de indexación vigentes.
         options: IndexOptions,
+        /// Raíz donde viven los adjuntos de las sesiones.
+        attachments_root: PathBuf,
     },
     /// Detiene el hilo.
     Shutdown,
@@ -554,6 +556,11 @@ pub enum IndexEvent {
         folder_id: String,
         /// Descripción del error.
         message: String,
+    },
+    /// Se reindexaron adjuntos de chats con un pipeline nuevo.
+    AttachmentsReindexed {
+        /// Cuántos adjuntos se reindexaron.
+        count: usize,
     },
 }
 
@@ -603,9 +610,13 @@ impl IndexWorker {
     ///
     /// Se usa al arrancar: tras actualizar la app (o las opciones, o las
     /// herramientas externas) la huella de procesamiento cambia y las carpetas
-    /// afectadas se reindexan solas, sin tocar las que ya están al día.
-    pub fn reindex_stale(&self, options: IndexOptions) {
-        let _ = self.command_tx.send(IndexCommand::ReindexStale { options });
+    /// afectadas se reindexan solas, sin tocar las que ya están al día. También
+    /// se reindexan los adjuntos de los chats que queden desfasados.
+    pub fn reindex_stale(&self, options: IndexOptions, attachments_root: PathBuf) {
+        let _ = self.command_tx.send(IndexCommand::ReindexStale {
+            options,
+            attachments_root,
+        });
     }
 
     /// Extrae todos los eventos disponibles sin bloquear.
@@ -660,7 +671,10 @@ fn worker_loop(db_path: &Path, command_rx: Receiver<IndexCommand>, event_tx: Sen
                     );
                 }
             }
-            IndexCommand::ReindexStale { options } => {
+            IndexCommand::ReindexStale {
+                options,
+                attachments_root,
+            } => {
                 let folders: Vec<Folder> = match storage.list_folders() {
                     Ok(folders) => folders,
                     Err(error) => {
@@ -682,6 +696,21 @@ fn worker_loop(db_path: &Path, command_rx: Receiver<IndexCommand>, event_tx: Sen
                             folder_id = %folder.id,
                             "no se pudo comprobar la huella del pipeline: {error}"
                         ),
+                    }
+                }
+
+                // Los adjuntos de los chats siguen el mismo criterio (HU-34).
+                match crate::attachments::reindex_stale_attachments(
+                    &mut storage,
+                    &attachments_root,
+                    &options,
+                ) {
+                    Ok(0) => {}
+                    Ok(count) => {
+                        let _ = event_tx.send(IndexEvent::AttachmentsReindexed { count });
+                    }
+                    Err(error) => {
+                        tracing::warn!("no se pudieron reindexar los adjuntos: {error}");
                     }
                 }
             }
