@@ -239,6 +239,7 @@ fn file_name(relative_path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Citation;
 
     fn options(max_chars: usize, overlap_chars: usize) -> ChunkingOptions {
         ChunkingOptions {
@@ -326,5 +327,72 @@ mod tests {
     fn secciones_vacias_no_producen_fragmentos() {
         let sections = vec![DocumentSection::new(None, None, "   \n  ")];
         assert!(chunk_sections("vacio.txt", &sections, &options(800, 100)).is_empty());
+    }
+
+    #[test]
+    fn la_cita_identifica_el_formato_y_su_ubicacion() {
+        // Cada formato se cita con la unidad que le es propia: página, diapositiva,
+        // fila (una sola, porque cada fila es un fragmento) o rango de líneas.
+        let sections = vec![
+            DocumentSection::new(None, Some(SectionLocation::Page(7)), "texto de la página"),
+            DocumentSection::new(
+                None,
+                Some(SectionLocation::Slide(3)),
+                "texto de la diapositiva",
+            ),
+            DocumentSection::new(
+                None,
+                Some(SectionLocation::Rows {
+                    sheet: None,
+                    columns: Some("A:M".to_string()),
+                    first_row: 2669,
+                    prefix_lines: 0,
+                }),
+                "2669 | C-2026-02668 | Pendiente",
+            ),
+            DocumentSection::new(
+                None,
+                Some(SectionLocation::Lines { start: 10 }),
+                "linea diez",
+            ),
+        ];
+        let chunks = chunk_sections("mezcla.txt", &sections, &options(800, 100));
+
+        let etiquetas: Vec<String> = chunks
+            .iter()
+            .map(|chunk| Citation::from_chunk(chunk, 0.0).label())
+            .collect();
+        assert_eq!(
+            etiquetas,
+            vec![
+                "mezcla.txt (página 7)",
+                "mezcla.txt (diapositiva 3)",
+                "mezcla.txt (hoja 1, fila 2669)",
+                "mezcla.txt (líneas 10-10)",
+            ]
+        );
+    }
+
+    #[test]
+    fn markdown_y_texto_sin_ubicacion_se_citan_por_lineas() {
+        // El chunker de Markdown deja la ubicación a `None`: la cita cae al rango
+        // de líneas del fragmento, que es la unidad en la que se ancla la respuesta.
+        let chunk = Chunk {
+            id: "x".to_string(),
+            content_hash: "x".to_string(),
+            content: "# Título\n\nContenido".to_string(),
+            metadata: ChunkMetadata {
+                source_file: "guia.md".to_string(),
+                source_path: "docs/guia.md".to_string(),
+                heading: Some("Título".to_string()),
+                location: None,
+                start_line: 10,
+                end_line: 14,
+            },
+        };
+        assert_eq!(
+            Citation::from_chunk(&chunk, 0.0).label(),
+            "docs/guia.md (líneas 10-14)"
+        );
     }
 }

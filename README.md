@@ -93,6 +93,20 @@ Windows.
   del adjunto), que se cierra con la ✕ o con `Esc`.
 - Temperatura `0.1` por defecto para minimizar invenciones.
 
+| Formato | Dónde apunta la cita |
+|---|---|
+| Markdown y código | `líneas 12-20` (el fragmento temático) |
+| Texto plano (`.txt`) y `.doc` | `líneas 12-20` (el fragmento) |
+| PDF | `página 7` |
+| Word (`.docx`) | `página 7` |
+| PowerPoint | `diapositiva 3` |
+| Excel (`.xlsx`, `.xls`) y CSV | `hoja Ventas, fila 2669` (una fila por fragmento) |
+
+En los tres primeros casos el rango de líneas **es** el fragmento en el que se
+ancla la respuesta; en PDF, Word y PowerPoint la unidad es la página o la
+diapositiva; y en las tablas cada fila es un fragmento propio, para citar la fila
+concreta y no un bloque.
+
 ### Código generado, listo para guardar
 - Detecta los bloques de código de las respuestas y **deduce el nombre de
   archivo** declarado (`title="x.py"`, `file=x.py`, `python:x.py` o el texto

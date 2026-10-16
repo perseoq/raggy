@@ -61,6 +61,17 @@ A continuación, las tecnologías necesarias para construir este software, todas
   repetir el código.
 - Markdown y código usan un chunker estructural; CSV, Excel, Office y PDF pasan
   por `raggy-docs` antes de crear fragmentos con su ubicación de origen.
+- **Granularidad de la cita** según el formato (cada fila de una tabla es un
+  fragmento propio, `ROWS_PER_SECTION = 1`):
+
+  | Formato | Ubicación | Unidad del fragmento |
+  |---|---|---|
+  | Markdown y código | `líneas 12-20` | Sección temática (encabezado/bloque) |
+  | Texto plano y `.doc` | `líneas 12-20` | Sección de líneas |
+  | PDF | `página 7` | Todas las secciones de esa página |
+  | Word (`.docx`) | `página 7` | Párrafos de esa página |
+  | PowerPoint | `diapositiva 3` | Texto de esa diapositiva |
+  | Excel y CSV | `hoja Ventas, fila 2669` | Una fila (con la cabecera de columnas) |
 - El recuperador de un chat puede fusionar los fragmentos de la carpeta con los
   de los archivos adjuntos a la sesión (HU-34); cada resultado conserva su
   origen (`carpeta` o `adjunto: <nombre>`) para poder compararlos.

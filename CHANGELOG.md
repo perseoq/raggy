@@ -10,6 +10,16 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.2.15] - 2026-10-15
+
+### Añadido
+
+- Pruebas que fijan la **cita que ve el usuario según el formato**: página en PDF,
+  diapositiva en PowerPoint, `hoja X, fila N` en Excel y CSV, y rango de líneas en
+  texto, `.doc` y Markdown.
+- Tabla de **citas por formato** en el `README` y en `tech.md`, con la unidad de
+  fragmento de cada uno.
+
 ## [2.2.14] - 2026-10-15
 
 ### Corregido
