@@ -10,6 +10,16 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.2.13] - 2026-10-15
+
+### Corregido
+
+- El panel lateral de **citas y fragmentos** ya no invade la barra de botones:
+  ahora se declara dentro del área del chat (o de la exploración), **debajo** de
+  su barra de botones, así que la cabecera de la sesión (título, proveedor,
+  modelo, *Exportar sesión*, *Artefactos* y *Adjuntar*) y el compositor conservan
+  el ancho completo y el panel no los recorta.
+
 ## [2.2.12] - 2026-10-15
 
 ### Cambiado

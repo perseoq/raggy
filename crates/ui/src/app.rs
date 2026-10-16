@@ -2157,6 +2157,9 @@ impl RaggyApp {
         });
         self.query = query;
 
+        // El panel de fragmentos/citas, debajo de la barra (carpeta y buscador).
+        self.chunks_panel(ui);
+
         if let Some(note) = &self.search_note {
             ui.small(note);
         }
@@ -2515,6 +2518,11 @@ impl RaggyApp {
                     }
                 });
         });
+
+        // El panel de fragmentos/citas va dentro del área del chat: al declararse
+        // después de la barra de botones y del compositor, ambos conservan el ancho
+        // completo y el panel queda por debajo de los botones.
+        self.chunks_panel(ui);
 
         // Enter envía; Mayús+Intro inserta un salto de línea.
         let shift = ui.input(|input_state| input_state.modifiers.shift);
@@ -3864,8 +3872,8 @@ impl RaggyApp {
             self.session_dialog = Some(SessionDialog::Delete { id });
         }
 
-        // Los paneles deben declararse antes que el panel central.
-        self.chunks_panel(ui);
+        // El panel de citas se declara dentro de cada vista (chat o exploración),
+        // debajo de su barra de botones, para no recortarla ni taparla.
         Self::status_bar(ui, &self.status);
         for action in self.central(ui) {
             match action {
