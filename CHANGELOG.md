@@ -14,6 +14,11 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ### Corregido
 
+- La **auditoría de dependencias** de la CI vuelve a pasar: `zip` 8.x está
+  *yanked* y `calamine` (última versión, 0.36.1) exige `^8.6`, así que no hay
+  versión a la que actualizar sin romper la lectura de Excel; se silencia solo ese
+  aviso en `.cargo/audit.toml` (RustSec no reporta ninguna vulnerabilidad) y el
+  *job* recibe permiso para publicar el resultado.
 - Las carpetas cuyo índice se hizo con **otro pipeline** se **reindexan solas al
   arrancar**: al abrir la app se compara la huella de procesamiento de cada
   documento con la vigente y solo se reindexan las desfasadas (`ReindexStale`).

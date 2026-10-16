@@ -81,6 +81,10 @@ jobs:
   seguridad:
     name: Auditoría de dependencias
     runs-on: ubuntu-latest
+    # El action publica el resultado como *check*: necesita este permiso.
+    permissions:
+      contents: read
+      checks: write
     steps:
       - name: Clonar repositorio
         uses: actions/checkout@v7

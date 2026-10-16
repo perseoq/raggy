@@ -1,0 +1,10 @@
+# Configuración de `cargo audit` (RustSec).
+#
+# `zip` 8.x está *yanked* en crates.io y `calamine` —la última versión publicada,
+# 0.36.1— exige `^8.6`, de modo que no existe una versión a la que actualizar sin
+# romper la lectura de Excel; RustSec no reporta ninguna vulnerabilidad en el
+# árbol. Se silencia únicamente el aviso de crates *yanked* y se mantiene el resto
+# de comprobaciones. Vuelve a activarlo (`enabled = true`) cuando `calamine`
+# permita `zip` 9.
+[yanked]
+enabled = false
