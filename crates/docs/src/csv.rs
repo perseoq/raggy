@@ -132,40 +132,52 @@ mod tests {
 
     #[test]
     fn numera_filas_y_mapea_columnas() {
-        let section = csv_section(b"nombre,edad\nAna,30\nLuis,25\n");
-        assert!(section.text.contains("Columnas: A=nombre, B=edad"));
-        assert!(section.text.contains("2 | Ana | 30"));
-        assert!(section.text.contains("3 | Luis | 25"));
+        let document = extract(b"nombre,edad\nAna,30\nLuis,25\n").expect("extrae");
+        let primera = &document.sections[0];
+        let segunda = &document.sections[1];
+        assert!(primera.text.contains("Columnas: A=nombre, B=edad"));
+        assert!(primera.text.contains("2 | Ana | 30"));
+        assert!(segunda.text.contains("Columnas: A=nombre, B=edad"));
+        assert!(segunda.text.contains("3 | Luis | 25"));
         assert_eq!(
-            section.location,
+            primera.location,
             Location::Rows {
                 sheet: None,
                 columns: Some("A:B".to_string()),
                 first_row: 2,
-                last_row: 3,
+                last_row: 2,
                 prefix_lines: 1,
             }
         );
     }
 
     #[test]
-    fn agrupa_por_lotes_de_filas() {
+    fn cada_fila_es_una_seccion_para_citar_la_fila_exacta() {
         let mut csv = String::from("id,valor\n");
         for index in 0..250 {
             csv.push_str(&format!("{index},{}\n", index * 2));
         }
         let document = extract(csv.as_bytes()).expect("extrae");
-        assert_eq!(document.sections.len(), 3);
+        assert_eq!(document.sections.len(), 250, "una sección por fila");
         match &document.sections[2].location {
             Location::Rows {
                 first_row,
                 last_row,
                 ..
             } => {
-                assert_eq!((*first_row, *last_row), (202, 251));
+                assert_eq!(
+                    (*first_row, *last_row),
+                    (4, 4),
+                    "la sección cubre una sola fila"
+                );
             }
             other => panic!("ubicación inesperada: {other:?}"),
         }
+        assert_eq!(
+            document.sections[2].location.label(),
+            "hoja 1, fila 4",
+            "la cita apunta a la fila exacta"
+        );
     }
 
     #[test]

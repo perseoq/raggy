@@ -202,7 +202,7 @@ pub fn indexable_extensions() -> Vec<&'static str> {
 /// Incrementar cuando cambie la semántica del pipeline (extractores, chunkers,
 /// tokenización o embeddings) sin que cambien las opciones visibles. Al subirlo,
 /// la huella de procesamiento cambia y las carpetas se reindexan solas.
-const INDEX_PIPELINE_VERSION: u32 = 2;
+const INDEX_PIPELINE_VERSION: u32 = 3;
 
 /// Indexa una carpeta de forma incremental.
 ///
@@ -809,8 +809,8 @@ mod tests {
         assert!(!chunks.is_empty());
         assert_eq!(
             chunks[0].metadata.location.as_deref(),
-            Some("hoja 1, A2:B3"),
-            "el CSV debe citar hoja y coordenadas"
+            Some("hoja 1, fila 2"),
+            "el CSV debe citar la fila exacta"
         );
         assert!(chunks[0].content.contains("Ana"));
     }

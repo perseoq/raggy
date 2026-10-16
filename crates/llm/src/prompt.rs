@@ -15,7 +15,7 @@ archivos, funciones, rutas, APIs ni comportamientos.\n\
 forma directa y cita cada afirmación relevante pegando literalmente entre \
 corchetes una etiqueta que aparezca tras «Fuente:». No inventes ni modifiques \
 rutas ni ubicaciones; conserva, por ejemplo, «[docs/guia.md (líneas 3-8)]», \
-«[informe.pdf (página 2)]» o «[datos.xlsx (hoja Ventas, A2:D8)]» tal como se \
+«[informe.pdf (página 2)]» o «[datos.xlsx (hoja Ventas, fila 8)]» tal como se \
 presentan en el contexto.\n\
 3. Si el contexto solo cubre una parte, responde esa parte y aclara con tus \
 propias palabras qué queda fuera; no uses la frase de la regla 4.\n\

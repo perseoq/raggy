@@ -274,22 +274,24 @@ mod tests {
     }
 
     #[test]
-    fn extrae_un_libro_xlsx_y_conserva_el_rango_de_celdas() {
+    fn extrae_un_libro_xlsx_y_cita_cada_fila() {
         let bytes = xlsx_fixture();
         let document =
             extract_with_limits(&bytes, "xlsx", 1024 * 1024).expect("extrae el libro de prueba");
-        assert_eq!(document.sections.len(), 1);
+        assert_eq!(document.sections.len(), 2, "una sección por fila");
         assert!(document.sections[0].text.contains("2 | Ana | 30"));
-        assert!(document.sections[0].text.contains("3 | Luis | 25"));
+        assert!(document.sections[1].text.contains("3 | Luis | 25"));
         assert_eq!(
             document.sections[0].location,
             Location::Rows {
                 sheet: Some("Ventas".to_string()),
                 columns: Some("A:B".to_string()),
                 first_row: 2,
-                last_row: 3,
+                last_row: 2,
                 prefix_lines: 1,
             }
         );
+        assert_eq!(document.sections[0].location.label(), "hoja Ventas, fila 2");
+        assert_eq!(document.sections[1].location.label(), "hoja Ventas, fila 3");
     }
 }

@@ -358,6 +358,9 @@ impl Location {
                 ..
             } => {
                 let sheet = sheet.clone().unwrap_or_else(|| "1".to_string());
+                if first_row == last_row {
+                    return format!("hoja {sheet}, fila {first_row}");
+                }
                 match columns
                     .as_deref()
                     .and_then(|columns| columns.split_once(':'))
@@ -564,6 +567,18 @@ mod tests {
             }
             .label(),
             "hoja 1, filas 2-5"
+        );
+        assert_eq!(
+            Location::Rows {
+                sheet: Some("Ventas".to_string()),
+                columns: Some("A:M".to_string()),
+                first_row: 2669,
+                last_row: 2669,
+                prefix_lines: 1,
+            }
+            .label(),
+            "hoja Ventas, fila 2669",
+            "una sola fila se cita como fila, no como rango de celdas"
         );
         assert_eq!(Location::Slide(3).label(), "diapositiva 3");
         assert_eq!(Location::Page(7).label(), "página 7");

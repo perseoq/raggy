@@ -76,7 +76,7 @@ Software de escritorio con interfaz gráfica moderna, escrito en Rust, que funci
 - Recuperación de top-K fragmentos relevantes por consulta.
 - Re-ranking opcional para mejorar precisión.
 - Inyección de fragmentos con citas verificables de archivo y ubicación nativa
-  (líneas, página, diapositiva o coordenadas de hoja/celdas).
+  (líneas, página, diapositiva o hoja y fila).
 - Umbral relativo: el contexto se acota respecto al mejor resultado **de cada
   origen** (carpeta y adjuntos), sin descartar nunca el fragmento más relevante ni
   permitir que una fuente eclipse a la otra.

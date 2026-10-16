@@ -84,8 +84,9 @@ Windows.
   la fuente y, si no está en la documentación, responde
   «No encuentro esa información en los archivos indexados».
 - **Citas precisas por formato**: por **líneas** en Markdown y código, por
-  **página** en PDF y Word, por **diapositiva** en PowerPoint, y por **hoja y
-  coordenadas de celda** en Excel y CSV (`hoja Ventas, A2:D20`).
+  **página** en PDF y Word, por **diapositiva** en PowerPoint, y por **hoja y fila
+  exacta** en Excel y CSV (`hoja Ventas, fila 2669`), porque cada fila se indexa
+  como un fragmento propio.
 - **Citas verificadas y clicables** en cada respuesta: solo se marcan como
   ancladas las referencias que coinciden exactamente con fuentes recuperadas;
   al pulsarlas se abre en el panel lateral **solo ese fragmento** (de la carpeta o

@@ -182,7 +182,8 @@ documentos soportados,
 **Criterios de aceptación:**
 - Cada afirmación relevante incluye referencia al archivo fuente.
 - La cita indica la ubicación según el formato: líneas (Markdown/código), página
-  (PDF/Word), diapositiva (PowerPoint) o hoja + coordenadas de celda (Excel/CSV).
+  (PDF/Word), diapositiva (PowerPoint) o hoja + fila (Excel/CSV), donde cada fila
+  es un fragmento propio para que la cita apunte a esa fila concreta.
 - En todos los paneles y en la exportación se usa `ruta (ubicación)`; para texto
   sin localizador específico se usa `ruta (líneas N-M)`.
 - Solo se validan las etiquetas que coinciden literalmente con fragmentos

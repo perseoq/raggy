@@ -65,8 +65,11 @@ impl SectionLocation {
     }
 }
 
-/// Formatea un rango de celdas, p. ej. `A2:D20`, o `filas 2-20` sin columnas.
+/// Cita de un rango de celdas, p. ej. `A2:D20`, o `fila 7` cuando es una sola.
 fn cell_range(columns: &Option<String>, first_row: usize, last_row: usize) -> String {
+    if first_row == last_row {
+        return format!("fila {first_row}");
+    }
     match columns
         .as_deref()
         .and_then(|columns| columns.split_once(':'))

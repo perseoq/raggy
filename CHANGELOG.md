@@ -10,6 +10,20 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.2.14] - 2026-10-15
+
+### Corregido
+
+- En **Excel y CSV** la cita ya no abarca un rango de varias filas: cada fila se
+  indexa como un fragmento propio, así que la cita es `hoja 1, fila 2669` y el
+  panel muestra **solo esa fila** (antes indicaba `A2669:M2671` y mostraba las
+  tres filas del fragmento).
+- El índice se **reindexa solo** al abrir la app (huella del pipeline actualizada),
+  de modo que las citas antiguas con rangos desaparecen.
+- La etiqueta de una sola fila se muestra como `fila N` en lugar de `AN:MN`.
+- El resto de formatos no cambia: PDF y PowerPoint citan página/diapositiva
+  exactas, y Markdown, texto y `.doc` citan el rango de líneas del fragmento.
+
 ## [2.2.13] - 2026-10-15
 
 ### Corregido

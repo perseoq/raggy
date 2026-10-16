@@ -24,7 +24,11 @@ pub const MAX_MIN_TEXT_CHARS: usize = 5_000;
 
 /// Salvaguardas internas de parsers que no se amplían mediante la configuración.
 pub const MAX_ARCHIVE_ENTRIES: usize = 100_000;
-pub const ROWS_PER_SECTION: usize = 100;
+/// Filas por sección de una hoja de cálculo o CSV.
+///
+/// Es **una**: así cada fragmento es exactamente una fila y la cita apunta a la
+/// fila concreta (`hoja 1, fila 2669`) en lugar de a un rango de varias filas.
+pub const ROWS_PER_SECTION: usize = 1;
 pub const MAX_TOOL_PROBE_TIMEOUT_SECS: u64 = 15;
 pub const MIN_OCR_RENDER_DIMENSION: u32 = 512;
 pub const MAX_OCR_RENDER_DIMENSION: u32 = 8_192;
