@@ -991,6 +991,15 @@ impl RaggyApp {
                 self.status
                     .push_str(&format!(" {} omitido(s).", summary.skipped.len()));
             }
+            if !summary.warnings.is_empty() {
+                // Los avisos de extracción se ven en Configuración y se resumen aquí:
+                // sin esto un adjunto sin texto parecería estar indexado.
+                self.status.push_str(&format!(
+                    " {} aviso(s) de extracción (ver Configuración › OCR y conversión).",
+                    summary.warnings.len()
+                ));
+                self.index_warnings = summary.warnings.clone();
+            }
         }
 
         self.search_cache.invalidate_session(&session.id);
@@ -2482,11 +2491,24 @@ impl RaggyApp {
                         document.relative_path,
                         human_size(document.size_bytes)
                     );
-                    if ui
-                        .button(format!("{label}  ✕"))
-                        .on_hover_text("Quitar este adjunto del chat")
-                        .clicked()
-                    {
+                    // Un adjunto sin fragmentos no aporta nada al chat: se avisa.
+                    let sin_texto = document.chunk_count == 0;
+                    let boton = if sin_texto {
+                        egui::Button::new(
+                            egui::RichText::new(format!("{label}  ✕"))
+                                .color(crate::theme::warning_color(ui.visuals().dark_mode)),
+                        )
+                    } else {
+                        egui::Button::new(format!("{label}  ✕"))
+                    };
+                    let respuesta = ui.add(boton).on_hover_text(if sin_texto {
+                        "No se extrajo texto de este adjunto (0 fragmentos), así que el chat \
+                             no lo puede usar. Si es un PDF o una imagen escaneada, activa OCR en \
+                             Configuración (requiere Tesseract) y vuelve a adjuntarlo."
+                    } else {
+                        "Quitar este adjunto del chat"
+                    });
+                    if respuesta.clicked() {
                         actions.push(CentralAction::RemoveAttachment(
                             document.relative_path.clone(),
                         ));

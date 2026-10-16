@@ -30,7 +30,12 @@ que el usuario acaba de adjuntar a esta conversación, no documentación indexad
 Úsalos como material adicional; si la pregunta trata de dónde está, dónde se \
 registra o dónde se guarda algo en la documentación indexada, respóndela con las \
 fuentes de la carpeta. Cita cada afirmación con la etiqueta del fragmento del que \
-procede de verdad; nunca atribuyas a un archivo datos que aparecen en otro.";
+procede de verdad; nunca atribuyas a un archivo datos que aparecen en otro.\n\
+8. El contexto ya trae el texto extraído de los archivos: no intentes abrir, \
+descargar ni leer el archivo citado ni pidas permisos para ello. Si de un archivo \
+solo aparecen datos sueltos, responde con lo que haya; si no hay nada utilizable, \
+dilo con tus palabras (en el idioma de la pregunta) en vez de devolver un error \
+técnico.";
 
 /// Longitud máxima del contenido de un artefacto incluido en el prompt.
 const MAX_ARTIFACT_CHARS: usize = 4000;

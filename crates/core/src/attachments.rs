@@ -31,6 +31,10 @@ pub struct AttachmentSummary {
     pub replaced: Vec<String>,
     /// Orígenes omitidos y el motivo.
     pub skipped: Vec<AttachmentSkip>,
+    /// Avisos de la extracción (por ejemplo, un PDF escaneado sin OCR que no
+    /// aportó texto). Se muestran en la interfaz: si no, el adjunto parece
+    /// indexado pero no aporta nada al chat.
+    pub warnings: Vec<String>,
 }
 
 impl AttachmentSummary {
@@ -170,6 +174,16 @@ pub fn attach_files(
         };
         for warning in &warnings {
             tracing::warn!(path = %path.display(), "{warning}");
+            summary.warnings.push(format!("`{relative}`: {warning}"));
+        }
+        if chunks.is_empty() {
+            // Sin fragmentos el adjunto no aporta nada al chat: hay que decirlo.
+            let aviso = format!(
+                "`{relative}` no aportó texto: puede estar escaneado o ser una imagen; \
+                 activa OCR en Configuración (con Tesseract instalado) y vuelve a adjuntarlo."
+            );
+            tracing::warn!(path = %path.display(), "{aviso}");
+            summary.warnings.push(aviso);
         }
 
         let embeddings = embed_chunks(&chunks, options.embedding_dimensions);
@@ -601,6 +615,37 @@ mod tests {
         assert_eq!(sanitize_name("carpeta/informe.md"), "carpeta_informe.md");
         assert_eq!(sanitize_name("   "), "adjunto");
         assert_eq!(sanitize_name(".oculto.md"), "oculto.md");
+    }
+
+    #[test]
+    fn avisa_cuando_un_adjunto_no_aporta_texto() {
+        let (mut storage, session_id, directory) = sesion_de_prueba("sin-texto");
+        let origin = temp_dir("sin-texto-origen");
+        let vacio = origin.join("escaneado.txt");
+        std::fs::write(&vacio, "   \n\n   \n").expect("escribe el adjunto");
+
+        let summary = attach_files(
+            &mut storage,
+            &session_id,
+            &directory,
+            std::slice::from_ref(&vacio),
+            &IndexOptions::default(),
+        )
+        .expect("adjunta");
+
+        assert_eq!(summary.attached, vec!["escaneado.txt".to_string()]);
+        assert!(
+            summary
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("no aportó texto")),
+            "un adjunto sin texto debe avisar: {:?}",
+            summary.warnings
+        );
+        let documentos = storage.list_session_documents(&session_id).expect("lista");
+        assert_eq!(documentos[0].chunk_count, 0);
+
+        let _ = std::fs::remove_dir_all(&origin);
     }
 
     #[test]

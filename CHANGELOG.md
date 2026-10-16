@@ -10,6 +10,20 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.2.19] - 2026-10-15
+
+### Corregido
+
+- Un adjunto del que **no se extrae texto** (PDF escaneado o imagen, sin OCR
+  disponible) ya no se queda en silencio: al adjuntarlo se avisa con el motivo
+  (incluidos los avisos de OCR), los avisos aparecen en *Configuración › OCR y
+  conversión* y su etiqueta sobre el chat se marca como «0 fragmentos», para que no
+  parezca que el chat lo está usando cuando no aporta nada.
+- El prompt de sistema aclara que el contexto **ya contiene el texto extraído** de
+  los archivos: el modelo no debe intentar abrir, descargar ni leer el archivo
+  citado, y si no hay datos utilizables debe decirlo con sus palabras en lugar de
+  devolver un error técnico.
+
 ## [2.2.18] - 2026-10-15
 
 ### Corregido
