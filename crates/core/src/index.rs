@@ -204,6 +204,24 @@ pub fn indexable_extensions() -> Vec<&'static str> {
 /// la huella de procesamiento cambia y las carpetas se reindexan solas.
 const INDEX_PIPELINE_VERSION: u32 = 3;
 
+/// ¿Hay que reindexar la carpeta porque su índice se hizo con otro pipeline?
+///
+/// Compara la huella de procesamiento guardada en cada documento con la actual.
+/// La huella cambia al actualizar la app (versión del pipeline), al cambiar las
+/// opciones de ingesta y al instalar o actualizar las herramientas externas
+/// (OCR, LibreOffice, pdftoppm); en todos esos casos el índice queda desfasado.
+pub fn folder_needs_reindex(
+    storage: &Storage,
+    folder_id: &str,
+    options: &IndexOptions,
+) -> Result<bool> {
+    let current = processing_fingerprint(options);
+    let documents = storage.list_documents(folder_id)?;
+    Ok(documents
+        .iter()
+        .any(|document| document.processing_hash != current))
+}
+
 /// Indexa una carpeta de forma incremental.
 ///
 /// `report` recibe el progreso para poder mostrar una barra en la interfaz.
@@ -514,6 +532,11 @@ pub enum IndexCommand {
         /// Opciones de indexación vigentes.
         options: IndexOptions,
     },
+    /// Reindexa solo las carpetas cuyo índice se hizo con otro pipeline.
+    ReindexStale {
+        /// Opciones de indexación vigentes.
+        options: IndexOptions,
+    },
     /// Detiene el hilo.
     Shutdown,
 }
@@ -576,6 +599,15 @@ impl IndexWorker {
         let _ = self.command_tx.send(IndexCommand::ReindexAll { options });
     }
 
+    /// Reindexa solo las carpetas cuyo índice se hizo con otro pipeline.
+    ///
+    /// Se usa al arrancar: tras actualizar la app (o las opciones, o las
+    /// herramientas externas) la huella de procesamiento cambia y las carpetas
+    /// afectadas se reindexan solas, sin tocar las que ya están al día.
+    pub fn reindex_stale(&self, options: IndexOptions) {
+        let _ = self.command_tx.send(IndexCommand::ReindexStale { options });
+    }
+
     /// Extrae todos los eventos disponibles sin bloquear.
     pub fn drain(&self) -> Vec<IndexEvent> {
         self.event_rx.try_iter().collect()
@@ -626,6 +658,31 @@ fn worker_loop(db_path: &Path, command_rx: Receiver<IndexCommand>, event_tx: Sen
                         Path::new(&folder.path),
                         &options,
                     );
+                }
+            }
+            IndexCommand::ReindexStale { options } => {
+                let folders: Vec<Folder> = match storage.list_folders() {
+                    Ok(folders) => folders,
+                    Err(error) => {
+                        tracing::error!("no se pudieron listar las carpetas: {error}");
+                        continue;
+                    }
+                };
+                for folder in folders {
+                    match folder_needs_reindex(&storage, &folder.id, &options) {
+                        Ok(true) => run_index(
+                            &mut storage,
+                            &event_tx,
+                            &folder.id,
+                            Path::new(&folder.path),
+                            &options,
+                        ),
+                        Ok(false) => {}
+                        Err(error) => tracing::warn!(
+                            folder_id = %folder.id,
+                            "no se pudo comprobar la huella del pipeline: {error}"
+                        ),
+                    }
                 }
             }
         }
@@ -931,6 +988,44 @@ mod tests {
             .expect("lee documento actualizado")
             .expect("sigue existiendo");
         assert_ne!(current.processing_hash, previous);
+    }
+
+    #[test]
+    fn detecta_las_carpetas_con_el_pipeline_anticuado() {
+        let dir = TemporalDir::new("huella");
+        dir.write("uno.md", "# Uno\n\ntexto uno\n");
+
+        let mut storage = Storage::open_in_memory().expect("abre");
+        let folder = Folder::new(dir.path.to_string_lossy().to_string(), "docs");
+        storage.upsert_folder(&folder).expect("guarda carpeta");
+
+        let mut sin_progreso = |_| {};
+        index_folder(
+            &mut storage,
+            &folder.id,
+            &dir.path,
+            &options(),
+            &mut sin_progreso,
+        )
+        .expect("indexa");
+
+        assert!(
+            !folder_needs_reindex(&storage, &folder.id, &options()).expect("comprueba"),
+            "con la misma huella no hay nada que rehacer"
+        );
+
+        // Otra opción de ingesta (o una versión nueva del pipeline) invalida el índice.
+        let mut changed = options();
+        changed.chunking.max_chars += 1;
+        assert!(
+            folder_needs_reindex(&storage, &folder.id, &changed).expect("comprueba"),
+            "al cambiar la huella la carpeta debe reindexarse"
+        );
+
+        // Una carpeta sin documentos no entra en la reindexación automática.
+        let vacia = Folder::new("/tmp/sin-indice", "vacia");
+        storage.upsert_folder(&vacia).expect("guarda carpeta");
+        assert!(!folder_needs_reindex(&storage, &vacia.id, &options()).expect("comprueba"));
     }
 
     #[test]

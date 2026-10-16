@@ -10,6 +10,19 @@ y el proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [2.2.16] - 2026-10-15
+
+### Corregido
+
+- Las carpetas cuyo índice se hizo con **otro pipeline** se **reindexan solas al
+  arrancar**: al abrir la app se compara la huella de procesamiento de cada
+  documento con la vigente y solo se reindexan las desfasadas (`ReindexStale`).
+  Antes, cambiar la versión del pipeline, las opciones de ingesta o instalar
+  tesseract/LibreOffice/pdftoppm dejaba el índice antiguo en uso hasta que el
+  usuario pulsara «Reindexar todo» a mano, así que las citas seguían mostrando el
+  troceado viejo (p. ej. `ventas.csv (hoja 1, A2088:N2090)` en lugar de
+  `fila 2090`).
+
 ## [2.2.15] - 2026-10-15
 
 ### Añadido

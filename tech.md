@@ -47,6 +47,9 @@ A continuación, las tecnologías necesarias para construir este software, todas
 - SQLite (`rusqlite`) persiste chunks y vectores. El índice vectorial coseno y
   BM25 se construyen en memoria y se conservan en caché por carpeta y por sesión;
   se renuevan cuando cambia la revisión del índice o la de los adjuntos.
+- **Reindexación automática por huella**: al arrancar se compara la huella de
+  procesamiento de cada documento con la vigente (`folder_needs_reindex`) y se
+  reindexan solo las carpetas desfasadas, sin bloquear la interfaz.
 - El recuperador fusiona BM25 normalizado y similitud vectorial. Los parámetros
   de BM25, el peso vectorial y la amplitud del pool se pueden ajustar mediante
   `HybridRetrieverOptions`. La tokenización descarta palabras vacías en español e

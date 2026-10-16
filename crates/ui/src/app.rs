@@ -386,6 +386,13 @@ impl RaggyApp {
         app.reload_folders();
         app.sync_watcher();
         app.refresh_keys();
+
+        // Si el índice se hizo con otro pipeline (otra versión de la app, otras
+        // opciones de ingesta o herramientas recién instaladas), se reindexa solo.
+        if let Some(worker) = &app.worker {
+            worker.reindex_stale(app.index_options());
+        }
+
         app
     }
 
